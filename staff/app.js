@@ -92,7 +92,7 @@
     $('login-pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
   }
   function signOut() {
-    state.pin = null; state.role = null; state.orders = [];
+    state.pin = null; state.role = null; state.orders = []; state.updatedAt = null;
     set(LS.pin, null); set(LS.role, null); set(LS.cache, null);
     closeSheet(); screen('login'); $('login-pin').focus();
   }
@@ -137,6 +137,7 @@
   function renderList() {
     var isAdmin = state.role === 'admin';
     var list = filtered();
+    if (!list.length && !state.updatedAt) { $('list').innerHTML = '<div class="empty loading"><strong>Loading orders…</strong></div>'; return; }
     if (!list.length) { var t = emptyText(); $('list').innerHTML = '<div class="empty"><strong>' + t[0] + '</strong>' + t[1] + '</div>'; return; }
     $('list').innerHTML = list.map(function (o) {
       var h = '<article class="card' + (o.status === 'CANCELLED' ? ' dim' : '') + '" data-no="' + o.orderNo + '">' +
