@@ -322,8 +322,8 @@
   function showOrder(o) {
     state.order = o; state.token = o.token;
     setUrlParams({ o: o.token });
-    renderOrder();
-    go('status');
+    // The status page needs the e-transfer email from config; wait for it (already loaded in the background).
+    cfgReady.then(function () { renderOrder(); go('status'); });
   }
   function renderOrder() {
     var o = state.order, cfg = state.cfg;
@@ -471,19 +471,22 @@
     $('brand').textContent = cfg.schoolName || 'PRIME';
     document.title = (cfg.schoolName ? cfg.schoolName + ' ' : '') + 'Book orders';
   }
+  // Config (e-transfer email, pickup note) loads in the background so the form appears instantly,
+  // even while the server is cold-starting. Retries once; falls back to safe defaults.
+  state.cfg = { schoolName: 'PRIME', etransferEmail: '', pickupNote: 'Show this code at reception to pick up your books.' };
+  var cfgReady = call('getPublicConfig').catch(function () { return call('getPublicConfig'); })
+    .then(function (cfg) { if (cfg) applyConfig(cfg); return state.cfg; })
+    .catch(function () { return state.cfg; });
   function boot() {
-    call('getPublicConfig').then(function (cfg) {
-      applyConfig(cfg);
-      var token = String(INITIAL.o || '').trim();
-      var savedPin = null; try { savedPin = sessionStorage.getItem('bo_pin'); } catch (e) {}
-      if (INITIAL.staff !== undefined) {
-        if (savedPin) { state.pin = savedPin; call('staffLogin', savedPin).then(function (r) { state.role = r.role; go('dash'); }).catch(function () { go('staff'); }); }
-        else go('staff');
-      } else if (token) {
-        state.token = token;
-        call('getOrder', token).then(function (o) { if (o) showOrder(o); else go('order'); }).catch(function () { go('order'); });
-      } else go('order');
-    }).catch(function (e) { $('loading').textContent = 'Could not load: ' + (e.message || e) + '. Refresh to try again.'; });
+    var token = String(INITIAL.o || '').trim();
+    var savedPin = null; try { savedPin = sessionStorage.getItem('bo_pin'); } catch (e) {}
+    if (INITIAL.staff !== undefined) {
+      if (savedPin) { state.pin = savedPin; call('staffLogin', savedPin).then(function (r) { state.role = r.role; go('dash'); }).catch(function () { go('staff'); }); }
+      else go('staff');
+    } else if (token) {
+      state.token = token;
+      call('getOrder', token).then(function (o) { if (o) showOrder(o); else go('order'); }).catch(function () { go('order'); });
+    } else go('order');
   }
   boot();
 </script>
