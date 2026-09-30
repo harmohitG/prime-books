@@ -3,84 +3,94 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1F4E33">
+<meta name="theme-color" content="#f2f4f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1412" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="PRIME (Staff)">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PRIME Staff">
+<meta name="format-detection" content="telephone=no">
 <title>PRIME (Staff)</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div id="app">
-  <header class="bar">
-    <div class="bar-title"><span class="mark" aria-hidden="true"></span><span id="bar-name">PRIME</span></div>
-    <div class="bar-right"><span id="bar-role" class="role"></span><button id="bar-menu" class="icon-btn" aria-label="Menu" hidden>&#8942;</button></div>
-  </header>
 
-  <main id="main">
-    <section id="v-boot" class="screen center"><div class="spinner" aria-label="Loading"></div></section>
+  <!-- ============ boot ============ -->
+  <section id="v-boot" class="screen center"><div class="spinner" aria-label="Loading"></div></section>
 
-    <section id="v-setup" class="screen" hidden>
-      <div class="hero"><div class="hero-mark" aria-hidden="true"></div><h1>Connect to the order system</h1><p class="muted">One-time setup. Paste the web app link from Google Apps Script (it ends in <code>/exec</code>).</p></div>
-      <label for="setup-url">Order system link</label>
-      <input id="setup-url" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
-      <p id="setup-error" class="error" hidden></p>
-      <button id="setup-go" class="primary">Connect</button>
-    </section>
+  <!-- ============ one-time: server link (only if config.js has none) ============ -->
+  <section id="v-setup" class="screen auth" hidden>
+    <div class="hero"><div class="app-icon" aria-hidden="true"></div><h1>Connect</h1><p class="muted">Paste the order system link from Google Apps Script. It ends in <code>/exec</code>.</p></div>
+    <div class="group"><input id="setup-url" class="cell-input" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" aria-label="Order system link"></div>
+    <p id="setup-error" class="error" hidden></p>
+    <button id="setup-go" class="btn primary block">Connect</button>
+  </section>
 
-    <section id="v-login" class="screen" hidden>
-      <div class="hero"><div class="hero-mark" aria-hidden="true"></div><h1>Staff sign in</h1><p class="muted">Enter your PIN to see book orders.</p></div>
-      <label for="login-pin">PIN</label>
-      <input id="login-pin" type="password" inputmode="numeric" autocomplete="one-time-code" enterkeyhint="go">
-      <label class="check-row"><input id="login-remember" type="checkbox" checked> Stay signed in on this phone</label>
-      <p id="login-error" class="error" hidden></p>
-      <button id="login-go" class="primary">Sign in</button>
-      <p class="fineprint"><button id="setup-change" class="link">Change order system link</button></p>
-    </section>
-
-    <section id="v-queue" class="screen" hidden>
-      <nav id="tabs" class="tabs" aria-label="Order lists"></nav>
-      <p id="queue-error" class="error" hidden></p>
-      <div id="offline" class="banner" hidden>You're offline. Showing the last list; actions will work again when you're back online.</div>
-      <div id="list" class="list"></div>
-      <p id="updated" class="fineprint center"></p>
-    </section>
-
-    <section id="v-settings" class="screen" hidden>
-      <h1>Settings</h1>
-      <label for="set-school_name">School name</label><input id="set-school_name" type="text">
-      <label for="set-etransfer_email">E-transfer email (students send money here)</label><input id="set-etransfer_email" type="email">
-      <div class="two">
-        <div><label for="set-price_sorrentino">Sorrentino price</label><input id="set-price_sorrentino" type="number" min="0" step="1" inputmode="numeric"></div>
-        <div><label for="set-price_palliative">Palliative bundle price</label><input id="set-price_palliative" type="number" min="0" step="1" inputmode="numeric"></div>
-      </div>
-      <label for="set-pickup_note">Pickup note shown to students</label><textarea id="set-pickup_note" rows="3"></textarea>
-      <div class="two">
-        <div><label for="set-admin_pin">Admin PIN</label><input id="set-admin_pin" type="text" autocomplete="off"></div>
-        <div><label for="set-reception_pin">Reception PIN</label><input id="set-reception_pin" type="text" autocomplete="off"></div>
-      </div>
-      <p id="set-error" class="error" hidden></p>
-      <p id="set-ok" class="success" hidden></p>
-      <button id="set-save" class="primary">Save settings</button>
-      <button id="set-back" class="secondary">Back to orders</button>
-    </section>
-  </main>
-
-  <div id="sheet" class="sheet" hidden>
-    <div class="sheet-card">
-      <button id="sheet-refresh" class="sheet-item">Refresh now</button>
-      <button id="sheet-settings" class="sheet-item" hidden>Settings</button>
-      <button id="sheet-lookup" class="sheet-item">Re-read accounting workbook</button>
-      <button id="sheet-install" class="sheet-item" hidden>Add to home screen</button>
-      <button id="sheet-signout" class="sheet-item danger">Sign out</button>
-      <button id="sheet-close" class="sheet-item muted">Close</button>
+  <!-- ============ first run: create the admin account ============ -->
+  <section id="v-bootstrap" class="screen auth" hidden>
+    <div class="hero"><div class="app-icon" aria-hidden="true"></div><h1>Set up PRIME Staff</h1><p class="muted">Create the admin account. You'll use it to add everyone else.</p></div>
+    <div class="group">
+      <label class="cell"><span>Setup PIN</span><input id="bs-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="From Settings"></label>
+      <label class="cell"><span>Your name</span><input id="bs-name" type="text" autocomplete="name" placeholder="First and last name"></label>
+      <label class="cell"><span>Username</span><input id="bs-username" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username" placeholder="e.g. hsg"></label>
+      <label class="cell"><span>Password</span><input id="bs-password" type="password" autocomplete="new-password" placeholder="8+ characters"></label>
+      <label class="cell"><span>Confirm</span><input id="bs-password2" type="password" autocomplete="new-password" placeholder="Type it again"></label>
     </div>
-  </div>
+    <p class="group-foot">The setup PIN is the admin PIN in the Settings tab of the Book Orders sheet (1234 unless you changed it). It's only used this once.</p>
+    <p id="bs-error" class="error" hidden></p>
+    <button id="bs-go" class="btn primary block">Create admin account</button>
+  </section>
 
+  <!-- ============ sign in ============ -->
+  <section id="v-login" class="screen auth" hidden>
+    <div class="hero"><div class="app-icon" aria-hidden="true"></div><h1>PRIME Staff</h1><p class="muted">Sign in with the username and password your admin gave you.</p></div>
+    <form id="login-form" autocomplete="on" novalidate>
+      <div class="group">
+        <label class="cell"><span>Username</span><input id="login-username" name="username" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username" enterkeyhint="next"></label>
+        <label class="cell"><span>Password</span><input id="login-password" name="password" type="password" autocomplete="current-password" enterkeyhint="go"><button type="button" class="reveal" data-reveal="login-password" aria-label="Show password">Show</button></label>
+      </div>
+      <p id="login-error" class="error" hidden></p>
+      <button id="login-go" type="submit" class="btn primary block">Sign in</button>
+    </form>
+    <p class="fineprint center">After signing in you'll pick a 4-digit PIN to open the app on this phone.</p>
+  </section>
+
+  <!-- ============ PIN pad (unlock / create / change) ============ -->
+  <section id="v-pin" class="screen pin" hidden>
+    <div class="pin-head">
+      <div id="pin-avatar" class="avatar xl" aria-hidden="true"></div>
+      <h1 id="pin-title">Enter your PIN</h1>
+      <p id="pin-sub" class="muted"></p>
+    </div>
+    <div id="pin-dots" class="pin-dots" aria-live="polite"><i></i><i></i><i></i><i></i></div>
+    <p id="pin-error" class="error center" hidden></p>
+    <div class="keypad" id="keypad">
+      <button data-key="1">1</button><button data-key="2">2<small>ABC</small></button><button data-key="3">3<small>DEF</small></button>
+      <button data-key="4">4<small>GHI</small></button><button data-key="5">5<small>JKL</small></button><button data-key="6">6<small>MNO</small></button>
+      <button data-key="7">7<small>PQRS</small></button><button data-key="8">8<small>TUV</small></button><button data-key="9">9<small>WXYZ</small></button>
+      <span></span><button data-key="0">0</button><button data-key="del" class="del" aria-label="Delete">&#9003;</button>
+    </div>
+    <p class="center"><button id="pin-alt" class="link"></button></p>
+  </section>
+
+  <!-- ============ the app ============ -->
+  <section id="v-main" class="main" hidden>
+    <header class="nav" id="nav">
+      <div class="nav-left" id="nav-left"></div>
+      <div class="nav-title" id="nav-title"></div>
+      <div class="nav-right" id="nav-right"></div>
+    </header>
+    <div id="offline" class="offline" hidden>You're offline. Changes will work again when you're back online.</div>
+    <main id="page" class="page"></main>
+    <nav class="tabbar" id="tabbar" aria-label="Sections"></nav>
+  </section>
+
+  <!-- ============ overlays ============ -->
+  <div id="dlg" class="dlg" hidden role="dialog" aria-modal="true"></div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </div>
 <script src="../config.js"></script>

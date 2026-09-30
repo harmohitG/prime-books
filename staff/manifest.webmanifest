@@ -1,12 +1,12 @@
 {
   "name": "PRIME (Staff)",
-  "short_name": "PRIME (Staff)",
-  "description": "Book orders for PRIME International College staff: confirm payments, hand out books.",
+  "short_name": "PRIME Staff",
+  "description": "PRIME International College staff app: book orders, pickups, stock and staff accounts.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#1F4E33",
+  "background_color": "#f2f4f3",
   "theme_color": "#1F4E33",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
