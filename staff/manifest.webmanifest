@@ -1,0 +1,16 @@
+{
+  "name": "PRIME (Staff)",
+  "short_name": "PRIME (Staff)",
+  "description": "Book orders for PRIME International College staff: confirm payments, hand out books.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1F4E33",
+  "theme_color": "#1F4E33",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
