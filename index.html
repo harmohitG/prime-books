@@ -445,7 +445,7 @@
   }
   function cancelOrder(orderNo, btn) {
     if (btn && btn.dataset.armed !== '1') {
-      btn.dataset.armed = '1'; btn.textContent = 'Tap again to cancel #' + orderNo; btn.style.color = 'var(--danger)';
+      btn.dataset.armed = '1'; btn.textContent = 'Tap again to cancel #' + orderNo; btn.style.color = 'var(--red)';
       setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = 'Cancel'; btn.style.color = ''; } }, 4000);
       return;
     }
