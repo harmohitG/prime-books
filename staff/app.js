@@ -16,7 +16,7 @@
     stats: null, staff: null, activity: null, actFilter: 'all', settings: null, me: null, revealPin: {},
     timer: null, hiddenAt: 0, busy: false, deferredInstall: null, pin: { mode: 'unlock', digits: '', first: '', busy: false }, loadedAt: {},
     push: null, os: null, pushState: 'off', pendingOrder: null,
-    cash: null, cashRange: { key: 'today' }, cashRep: null, cashDetail: null, cashToday: null, cashMine: null, cashItems: null
+    cash: null, cashRange: { key: 'today' }, cashRep: null, cashDetail: null, cashToday: null, cashMine: null, cashItems: null, cashBook: null, practice: false
   };
   /** true (and marks it) if `key` hasn't been loaded in the last `ms`: stops pages that re-render after loading from loading again. */
   function stale(key, ms) { var t = state.loadedAt[key] || 0; if (Date.now() - t < (ms || 15000)) return false; state.loadedAt[key] = Date.now(); return true; }
@@ -185,7 +185,7 @@
   function showLogin(msg) {
     screen('login'); err('login-error', msg || '');
     $('login-password').value = '';
-    setTimeout(function () { ($('login-username').value ? $('login-password') : $('login-username')).focus(); }, 50);
+    setTimeout(function () { var el = $('login-username').value ? $('login-password') : $('login-username'); if (el) el.focus(); }, 50);
     if (state.url) api('authStatus').then(function (s) { if (!s.bootstrapped && !$('v-login').hidden) screen('bootstrap'); }).catch(function () {});
   }
   function initLogin() {
@@ -239,7 +239,7 @@
       sapi('staffUnlock', [pin]).then(function (r) {
         pinBusy(false); state.user = r.user; set(LS.user, JSON.stringify(r.user));
         if (r.needsPin) return showPin('create');
-        enterMain();
+        enterMain(r.list || null);
       }).catch(function (e) { pinBusy(false); if (!e.signedOut) pinShake(e.message); });
       return;
     }
@@ -280,11 +280,12 @@
     t.push({ key: 'me', label: 'Me', icon: ICON.me });
     return t;
   }
-  function enterMain() {
+  function enterMain(list) {
     state.unlocked = true; screen('main');
+    if (list) applyList(list);   // came back with the PIN unlock: no second round-trip
     var t = get(LS.tab); state.tab = tabsFor().some(function (x) { return x.key === t; }) ? t : 'orders';
     state.stack = []; state.seg = get(LS.seg);
-    render(); loadOrders(false); startPolling();
+    render(); if (!list) loadOrders(false); else { if (state.pendingOrder) openPendingOrder(); } startPolling();
   }
   function resumeMain() { screen('main'); render(); startPolling(); }
   function lock() {
@@ -379,7 +380,7 @@
     var h = '<article class="card' + (o.status === 'CANCELLED' ? ' cancelled' : '') + '" data-no="' + o.orderNo + '">' +
       '<div class="c-top"><div class="c-name">' + esc(displayName(o)) + '</div>' +
       (o.included ? '<div class="c-amt included">Included</div>' : '<div class="c-amt">' + money(o.amount) + '</div>') + '</div>' +
-      '<div class="c-sub">' + esc(itemsText(o)) + ' · #' + o.orderNo + '</div>' +
+      '<div class="c-sub">' + esc(itemsText(o)) + ' · #' + o.orderNo + (o.test ? ' <span class="chip test">TEST</span>' : '') + '</div>' +
       '<div class="c-sub faint">' + esc(o.batch) + '</div>' +
       '<div class="c-status">' + pill(o) + '<span class="c-when">' + esc(whenText(o)) + '</span></div>';
     var tags = (o.flags || []).filter(function (f) { return f !== 'Included'; });
@@ -407,7 +408,7 @@
     if (o.staffNote) kv.push(['Staff note', esc(o.staffNote)]);
     var acts = '';
     if (can('notes')) acts += '<button class="btn small" data-act="note">' + (o.staffNote ? 'Edit note' : 'Add note') + '</button>';
-    if (can('cancel') && o.status !== 'PICKED_UP' && o.status !== 'CANCELLED') acts += '<button class="btn small danger" data-act="cancel">Cancel order</button>';
+    if (can('cancel') && o.status !== 'CANCELLED' && (o.status !== 'PICKED_UP' || can('override'))) acts += '<button class="btn small danger" data-act="cancel">' + (o.status === 'PICKED_UP' ? 'Cancel (owner)' : 'Cancel order') + '</button>';
     h += '<details class="more" data-more="' + o.orderNo + '"' + (state.openMore[o.orderNo] ? ' open' : '') + '><summary>Details' + ICON.chev + '</summary>' +
       '<dl class="kv">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl>' +
       (acts ? '<div class="more-actions">' + acts + '</div>' : '') + '</details>';
@@ -464,16 +465,22 @@
     if (!state.token || !state.unlocked) return Promise.resolve();
     var btn = document.querySelector('[data-act="refresh"]'); if (btn && !silent) btn.classList.add('spin');
     return sapi('staffList').then(function (r) {
-      state.orders = r.orders; state.ordersAt = new Date(); state.lookup = r.lookup; if (r.stock) state.stock = r.stock;
-      var roleChanged = state.user && r.me && (r.me.role !== state.user.role);
-      state.user = r.me; set(LS.user, JSON.stringify(r.me));
-      if (r.push && (can('push_orders') || can('push_ready'))) initPush(r.push); else state.push = null;
+      var roleChanged = applyList(r);
       if (state.pendingOrder) openPendingOrder();
       if (roleChanged) { state.stack = []; if (!tabsFor().some(function (t) { return t.key === state.tab; })) state.tab = 'orders'; rerender(); }
       else { updateOrders(); renderTabbar(); if (current().page === 'stock' && !state.busy) updateStock(); }
     }).catch(function (e) { if (!silent && !e.signedOut) toast(e.message); })
       .then(function () { var b = document.querySelector('[data-act="refresh"]'); if (b) b.classList.remove('spin'); });
   }
+  function applyList(r) {
+    state.orders = r.orders; state.ordersAt = new Date(); state.lookup = r.lookup; if (r.stock) state.stock = r.stock;
+    var roleChanged = !!(state.user && r.me && (r.me.role !== state.user.role));
+    state.user = r.me; set(LS.user, JSON.stringify(r.me));
+    if (r.push && (can('push_orders') || can('push_ready'))) initPush(r.push); else state.push = null;
+    setPractice(!!r.practice);
+    return roleChanged;
+  }
+  function setPractice(on) { state.practice = on; var b = $('practice-bar'); if (b) b.hidden = !on; }
   function startPolling() { stopPolling(); state.timer = setInterval(function () { if (document.visibilityState === 'visible' && state.unlocked && !state.busy && $('dlg').hidden) loadOrders(true); }, POLL_MS); }
   function stopPolling() { if (state.timer) { clearInterval(state.timer); state.timer = null; } }
   function orderByNo(no) { for (var i = 0; i < state.orders.length; i++) if (state.orders[i].orderNo === no) return state.orders[i]; return null; }
@@ -497,8 +504,9 @@
       dialog({ title: 'Hand over to ' + firstName(nm) + '?', html: 'Check their code matches <b style="font-family:var(--mono);letter-spacing:2px">' + esc(o.pickupCode) + '</b>, then give them: ' + esc(itemsText(o)) + '.', ok: 'Picked up' })
         .then(function (r) { if (r) runOrderAction(btn, 'markPickedUp', [o.orderNo], function (x) { toast(firstName(nm) + ' picked up #' + x.orderNo); refreshStockQuiet(); }); });
     } else if (act === 'cancel') {
-      dialog({ title: 'Cancel order #' + o.orderNo + '?', html: esc(nm) + ' will see it as cancelled. This can’t be undone.', ok: 'Cancel order', cancel: 'Keep', destructive: true,
-        inputs: [{ key: 'reason', placeholder: 'Reason (optional)', maxlength: 200 }] })
+      var picked = o.status === 'PICKED_UP';
+      dialog({ title: 'Cancel order #' + o.orderNo + '?', html: picked ? 'Owner override: the books go back into stock and this is logged. If cash was taken, void that record separately.' : esc(nm) + ' will see it as cancelled. This can’t be undone.', ok: 'Cancel order', cancel: 'Keep', destructive: true,
+        inputs: [{ key: 'reason', placeholder: picked ? 'Why? (required)' : 'Reason (optional)', maxlength: 200 }], validate: picked ? function (v) { return v.reason && v.reason.trim().length >= 3 ? '' : 'Say why.'; } : null })
         .then(function (r) { if (r) runOrderAction(null, 'cancelOrder', [o.orderNo, r.reason || ''], function () { toast('Order #' + o.orderNo + ' cancelled'); }); });
     } else if (act === 'note') {
       dialog({ title: 'Staff note', html: 'Only staff see this.', ok: 'Save', inputs: [{ key: 'note', value: o.staffNote || '', placeholder: 'e.g. picked up by her sister', maxlength: 300, textarea: true }] })
@@ -623,13 +631,24 @@
   }
 
   /* =================================================================== Cash at the desk */
-  function newCashState() { return { email: '', phone: '', name: '', lookup: null, looking: false, orderNo: null, sorrentino: false, palliative: false, matchKey: '', items: {}, tuition: false, tuitionAmt: '', tuitionNote: '', external: false }; }
-  function cashItemOn(i) { return !!state.cash.items[i.id] && i.wbStatus.status !== 'included'; }
+  function newCashState() { return { email: '', phone: '', name: '', lookup: null, looking: false, orderNo: null, sorrentino: false, palliative: false, matchKey: '', items: {}, tuition: false, tuitionAmt: '', tuitionNote: '', external: false, ovAmount: '', ovReason: '' }; }
+  function cashItemOn(i) { return !!state.cash.items[i.id] && (can('override') || !(i.wbStatus && i.wbStatus.status === 'included')); }
+  function cashItemBlocked(i) { return !!(i.wbStatus && i.wbStatus.status === 'included'); }
+  function bookBlocked(b) { return b.status === 'included' || b.out; }
+  function bookOn(b) { var c = state.cash; return !!c[b.key] && (can('override') || !bookBlocked(b)); }
+  // what the owner is overriding right now (blocked things ticked, or a changed total)
+  function cashOverrides() {
+    var c = state.cash, L = c.lookup, out = []; if (!L) return out;
+    if (!c.orderNo) cashBooks().forEach(function (b) { if (c[b.key] && bookBlocked(b)) out.push(b.label + (b.status === 'included' ? ' (included)' : ' (out of stock)')); });
+    L.items.forEach(function (i) { if (c.items[i.id] && cashItemBlocked(i)) out.push(i.name + ' (included)'); });
+    if (c.ovAmount !== '' && /^\d{1,6}(\.\d{1,2})?$/.test(String(c.ovAmount).trim())) out.push('total changed');
+    return out;
+  }
   function tuitionAmt() { var c = state.cash; if (!c.tuition) return 0; var a = String(c.tuitionAmt).trim(); return /^\d{1,6}(\.\d{1,2})?$/.test(a) ? Number(a) : 0; }
   function cashSummary() {
     var c = state.cash, L = c.lookup, a = [];
     if (c.orderNo) { var o = L.openOrders.filter(function (x) { return x.orderNo === c.orderNo; })[0]; if (o) a.push(itemsText(o) + ' (order #' + o.orderNo + ')'); }
-    else cashBooks().forEach(function (b) { if (c[b.key] && b.status !== 'included' && !b.out) a.push(b.label); });
+    else cashBooks().forEach(function (b) { if (bookOn(b)) a.push(b.label); });
     L.items.forEach(function (i) { if (cashItemOn(i)) a.push(i.name); });
     if (c.tuition && tuitionAmt() > 0) a.push('Tuition' + (c.tuitionNote.trim() ? ' (' + c.tuitionNote.trim() + ')' : ''));
     return a.join(' + ');
@@ -649,9 +668,10 @@
     var c = state.cash, L = c.lookup; if (!L) return 0;
     var t = 0;
     if (c.orderNo) { var o = L.openOrders.filter(function (x) { return x.orderNo === c.orderNo; })[0]; t = o ? o.amount : 0; }
-    else t = cashBooks().reduce(function (t, b) { return t + (c[b.key] && b.status !== 'included' && !b.out ? b.price : 0); }, 0);
+    else t = cashBooks().reduce(function (t, b) { return t + (bookOn(b) ? b.price : 0); }, 0);
     L.items.forEach(function (i) { if (cashItemOn(i)) t += i.price; });
     t += tuitionAmt();
+    if (can('override') && c.ovAmount !== '' && /^\d{1,6}(\.\d{1,2})?$/.test(String(c.ovAmount).trim())) t = Number(String(c.ovAmount).trim());
     return Math.round(t * 100) / 100;
   }
   function cashBodyHtml() {
@@ -671,7 +691,8 @@
     if (!c.orderNo) {
       h += '<div class="group-head">Books</div><div class="group">' + cashBooks().map(function (b) {
         var blocked = b.status === 'included' || b.out, note = b.status === 'included' ? 'In their fees. Don’t take cash.' : b.out ? 'Out of stock. Don’t take cash.' : b.status === 'paid' ? 'Workbook shows paid' + (b.paidOn ? ' ' + b.paidOn : '') + '. Check before taking cash.' : '';
-        return '<label class="row' + (blocked ? ' blocked' : '') + '"><input type="checkbox" data-book="' + b.key + '"' + (c[b.key] && !blocked ? ' checked' : '') + (blocked ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(b.label) + '</span>' +
+        var ovOk = blocked && can('override');
+        return '<label class="row' + (blocked ? ' blocked' : '') + (ovOk ? ' ov' : '') + '"><input type="checkbox" data-book="' + b.key + '"' + (c[b.key] && (!blocked || ovOk) ? ' checked' : '') + (blocked && !ovOk ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(b.label) + '</span>' +
           (note ? '<span class="sub' + (b.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(b.price) + '</span></label>';
       }).join('') + '</div>';
     }
@@ -680,15 +701,21 @@
     L.items.forEach(function (i) { var g = i.group || 'Other'; if (!byG[g]) { byG[g] = []; groups.push(g); } byG[g].push(i); });
     groups.forEach(function (g) {
       h += '<div class="group-head">' + esc(g) + '</div><div class="group">' + byG[g].map(function (i) {
-        var st = i.wbStatus || { status: '' }, blocked = st.status === 'included';
+        var st = i.wbStatus || { status: '' }, blocked = st.status === 'included', ovOk = blocked && can('override');
         var note = blocked ? 'In their fees. Don’t take cash.' : st.status === 'paid' ? 'Workbook shows ' + (i.wbLabel || i.name) + ' paid' + (st.amount != null ? ' ' + money(st.amount) : '') + (st.paidOn ? ' ' + st.paidOn : '') + '. Check before taking cash.' : st.status === 'owed' ? 'Owed per workbook' : '';
-        return '<label class="row' + (blocked ? ' blocked' : '') + '"><input type="checkbox" data-item="' + esc(i.id) + '"' + (c.items[i.id] && !blocked ? ' checked' : '') + (blocked ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(i.name) + '</span>' +
+        return '<label class="row' + (blocked ? ' blocked' : '') + (ovOk ? ' ov' : '') + '"><input type="checkbox" data-item="' + esc(i.id) + '"' + (c.items[i.id] && (!blocked || ovOk) ? ' checked' : '') + (blocked && !ovOk ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(i.name) + '</span>' +
           (note ? '<span class="sub' + (st.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(i.price) + '</span></label>';
       }).join('') + '</div>';
     });
     h += '<div class="group-head">Tuition</div><div class="group"><label class="row"><input type="checkbox" data-tuition="1"' + (c.tuition ? ' checked' : '') + '><span class="grow"><span class="title">Tuition payment</span><span class="sub">You type the amount. A note is required.</span></span></label>' +
       (c.tuition ? '<label class="cell"><span>Amount</span><input id="cash-tuition-amt" type="text" inputmode="decimal" autocomplete="off" value="' + esc(c.tuitionAmt) + '" placeholder="e.g. 500"></label>' +
         '<label class="cell"><span>Note</span><input id="cash-tuition-note" type="text" autocomplete="off" maxlength="120" value="' + esc(c.tuitionNote) + '" placeholder="e.g. instalment 2 of 4"></label>' : '') + '</div>';
+    if (can('override')) {
+      h += '<div class="group-head">Owner override</div><div class="group">' +
+        '<label class="cell"><span>Total</span><input id="cash-ov-amount" type="text" inputmode="decimal" autocomplete="off" value="' + esc(c.ovAmount) + '" placeholder="Leave blank to keep ' + money(cashAmount()) + '"></label>' +
+        '<label class="cell"><span>Reason</span><input id="cash-ov-reason" type="text" autocomplete="off" maxlength="200" value="' + esc(c.ovReason) + '" placeholder="Required for any override"></label></div>' +
+        '<p class="group-foot">Ticking something marked “needs override”, or changing the total, needs a reason. It’s flagged on the record and logged.</p>';
+    }
     var amt = cashAmount();
     h += '<div class="cash-total"><span>Cash to collect</span><b>' + money(amt) + '</b></div>';
     h += '<div class="group-head">Student signs</div><div class="sig"><canvas id="sig-student" aria-label="Student signature"></canvas><div class="sig-foot"><span id="sig-student-name">' + esc(c.name || 'Student') + ' · paid ' + money(amt) + ' cash</span><button class="link" data-act="sig-clear" data-sig="student">Clear</button></div></div>';
@@ -780,6 +807,8 @@
         if (e.target.id === 'cash-name') { state.cash.name = e.target.value; var n = $('sig-student-name'); if (n) n.textContent = (state.cash.name || 'Student') + ' \u00b7 paid ' + money(cashAmount()) + ' cash'; }
         else if (e.target.id === 'cash-tuition-amt') { state.cash.tuitionAmt = e.target.value; err('cash-error', ''); cashUpdateTotal(); }
         else if (e.target.id === 'cash-tuition-note') { state.cash.tuitionNote = e.target.value; err('cash-error', ''); }
+        else if (e.target.id === 'cash-ov-amount') { state.cash.ovAmount = e.target.value; err('cash-error', ''); cashUpdateTotal(); }
+        else if (e.target.id === 'cash-ov-reason') { state.cash.ovReason = e.target.value; err('cash-error', ''); }
       });
       $('page').addEventListener('change', function (e) {
         if (current().page !== 'cashNew' || !state.cash) return;
@@ -815,15 +844,18 @@
       if (!(tuitionAmt() > 0)) return err('cash-error', 'Enter the tuition amount, like 500 or 500.50.');
       if (c.tuitionNote.trim().length < 3) return err('cash-error', 'Add a note for the tuition payment, like “instalment 2 of 4”.');
     }
+    var ovs = cashOverrides();
+    if (ovs.length && c.ovReason.trim().length < 3) return err('cash-error', 'Owner override (' + ovs.join(', ') + '): say why in the Reason box.');
     if (!pads.student || !pads.student.signed()) return err('cash-error', 'The student needs to sign.');
     if (!pads.staff || !pads.staff.signed()) return err('cash-error', 'You need to sign as the person receiving the cash.');
     err('cash-error', '');
     var summary = cashSummary(), hand = cashHandOver();
-    dialog({ title: 'Take ' + money(amt) + ' cash?', html: 'Count the cash from <b>' + esc(c.name) + '</b> first.<br>For: ' + esc(summary) + '.' + (hand ? '<br>Then hand over the books.' : ''), ok: 'Cash received' }).then(function (r) {
+    dialog({ title: 'Take ' + money(amt) + ' cash?', html: 'Count the cash from <b>' + esc(c.name) + '</b> first.<br>For: ' + esc(summary) + '.' + (hand ? '<br>Then hand over the books.' : '') + (ovs.length ? '<br><b>Override:</b> ' + esc(ovs.join(', ')) + '.' : '') + (state.practice ? '<br><b>Practice mode:</b> this will be a TEST record.' : ''), ok: 'Cash received' }).then(function (r) {
       if (!r) return;
       var b = $('cash-go'); b.disabled = true; b.innerHTML = '<span class="spinner sm"></span>'; state.busy = true;
       var form = { name: c.name, email: c.email, phone: c.phone, matchKey: c.matchKey, external: !!c.external, orderNo: c.orderNo || '', sorrentino: !c.orderNo && c.sorrentino, palliative: !c.orderNo && c.palliative,
         items: c.lookup.items.filter(cashItemOn).map(function (i) { return i.id; }), tuition: c.tuition ? { amount: String(c.tuitionAmt).trim(), note: c.tuitionNote.trim() } : null,
+        override: ovs.length ? { reason: c.ovReason.trim(), amount: String(c.ovAmount).trim() } : null,
         studentSig: pads.student.png(), staffSig: pads.staff.png() };
       sapi('cashRecord', [form]).then(function (x) {
         buzz(30); state.cash = newCashState(); pads = {}; state.loadedAt.me = 0;
@@ -864,7 +896,7 @@
     r.records.forEach(function (x) {
       var day = dayLabel(x.at);
       if (day !== lastDay) { if (lastDay) out += '</div>'; out += '<div class="day">' + esc(day) + '</div><div class="group">'; lastDay = day; }
-      out += '<button class="row' + (x.status === 'void' ? ' void' : '') + '" data-act="go" data-page="cashDetail" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">' + esc(x.cashId) + ' · ' + esc(titleCase(x.workbookName || x.name)) + (x.status === 'void' ? ' <span class="chip grey">VOID</span>' : '') + '</span>' +
+      out += '<button class="row' + (x.status === 'void' ? ' void' : '') + '" data-act="go" data-page="cashDetail" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">' + esc(x.cashId) + ' · ' + esc(titleCase(x.workbookName || x.name)) + (x.status === 'void' ? ' <span class="chip grey">VOID</span>' : '') + (x.test ? ' <span class="chip test">TEST</span>' : '') + '</span>' +
         '<span class="sub">' + esc(x.summary) + ' · by ' + esc(firstName(x.receivedByName)) + ' · ' + esc(timeOf(x.at)) + '</span></span><span class="value strong">' + money(x.amount) + '</span><span class="chev">' + ICON.chev + '</span></button>';
     });
     return h + out + '</div>';
@@ -885,7 +917,8 @@
     right: function () { return navBtn('refresh-cash', ICON.refresh, 'Refresh'); },
     html: function () {
       var h = '<div class="large-row"><h1 class="large">Cash</h1></div>' +
-        '<button class="btn primary block" data-act="cash-new" style="margin-bottom:16px">' + ICON.plus + 'New cash payment</button>';
+        '<button class="btn primary block" data-act="cash-new" style="margin-bottom:12px">' + ICON.plus + 'New cash payment</button>' +
+        '<div class="group" style="margin-bottom:16px"><button class="row" data-act="cashbook"><span class="ic green">' + ICON.sheet + '</span><span class="grow"><span class="title">Cash book</span><span class="sub">Today’s drawer: float, cash in, cash out, closing count</span></span><span class="chev">' + ICON.chev + '</span></button></div>';
       if (!can('cash_report')) return h + '<div id="cash-rep">' + cashMineHtml() + '</div><p class="group-foot">Books, courses, exams and tuition paid in cash at the desk. The admin sees every record.</p>';
       var R = state.cashRange, segs = [['today', 'Today'], ['week', '7 days'], ['month', 'Month'], ['all', 'All'], ['custom', 'Custom']];
       return h + '<div class="seg">' + segs.map(function (s) { return '<button data-cashrange="' + s[0] + '" class="' + (R.key === s[0] ? 'on' : '') + '">' + s[1] + '</button>'; }).join('') + '</div>' +
@@ -918,7 +951,12 @@
         '<div class="group"><dl class="kv" style="padding:6px 16px 10px">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl></div>' +
         '<div class="group-head">Student signature</div><div class="sig-view"><img alt="Student signature" src="' + esc(x.studentSig) + '"><span>' + esc(x.name) + '</span></div>' +
         '<div class="group-head">Received by</div><div class="sig-view"><img alt="Staff signature" src="' + esc(x.staffSig) + '"><span>' + esc(x.receivedByName) + '</span></div>';
-      if (x.status !== 'void' && can('cash_void')) h += '<div class="group" style="margin-top:26px"><button class="row danger" data-act="cash-void" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">Void this record</span><span class="sub">If it was logged by mistake. Any books go back into stock; the record stays, marked VOID.</span></span></button></div>';
+      var acts = '';
+      if (can('override')) acts += '<button class="row accent" data-act="cash-edit" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">Fix name / phone / email</span><span class="sub">Owner only. Needs a reason; logged.</span></span></button>';
+      if (x.status !== 'void' && can('cash_void')) acts += '<button class="row danger" data-act="cash-void" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">Void this record</span><span class="sub">If it was logged by mistake. Any books go back into stock; the record stays, marked VOID.</span></span></button>';
+      if (x.status === 'void' && can('override')) acts += '<button class="row accent" data-act="cash-unvoid" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">Un-void</span><span class="sub">Owner only. Brings it back; any books come out of stock again.</span></span></button>';
+      if (acts) h += '<div class="group" style="margin-top:26px">' + acts + '</div>';
+      if (x.test) h = '<div class="banner amber">' + ICON.warn + '<span class="grow">TEST record from practice mode. Not counted anywhere.</span></div>' + h;
       return h;
     },
     after: function (c) {
@@ -927,6 +965,28 @@
     }
   };
   function agentLabel(a) { a = String(a || '').trim(); return !a || /^dir/i.test(a) ? 'Direct' : a; }
+  function cashEditAct(id) {
+    var x = state.cashDetail; if (!x) return;
+    dialog({ title: 'Fix ' + id, html: 'Owner override. The change is written on the record and logged.', ok: 'Save',
+      inputs: [{ key: 'name', value: x.name, placeholder: 'Name', maxlength: 80 }, { key: 'phone', value: x.phone, placeholder: 'Phone', maxlength: 30 }, { key: 'email', value: x.email, placeholder: 'Email', maxlength: 120 }, { key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }],
+      validate: function (v) { return v.reason && v.reason.trim().length >= 3 ? '' : 'Say why.'; } })
+      .then(function (r) { if (!r) return; sapi('cashEdit', [id, r]).then(function (y) { state.cashDetail = y; rerender(); toast('Saved'); state.cashRep = null; }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+  }
+  function cashUnvoidAct(id) {
+    dialog({ title: 'Un-void ' + id + '?', html: 'Owner override. The record comes back and any books come out of stock again.', ok: 'Un-void',
+      inputs: [{ key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }], validate: function (v) { return v.reason && v.reason.trim().length >= 3 ? '' : 'Say why.'; } })
+      .then(function (r) { if (!r) return; sapi('cashUnvoid', [id, r.reason]).then(function (y) { state.cashDetail = y; rerender(); toast(id + ' restored'); refreshStockQuiet(); state.cashRep = null; }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+  }
+  function practiceToggle(on) {
+    var go = function () { sapi('practiceSet', [on]).then(function (r) { setPractice(r.practice); toast(r.practice ? 'Practice mode on' : 'Practice mode off'); rerender(); }).catch(function (e) { if (!e.signedOut) { toast(e.message); rerender(); } }); };
+    if (!on) return go();
+    dialog({ title: 'Turn on practice mode?', html: 'Everything anyone makes while it’s on (orders on the student page too) is tagged TEST: not counted, no stock changes, no pings or emails. Turn it off when you’re done and wipe the test data.', ok: 'Turn on' })
+      .then(function (r) { if (r) go(); else rerender(); });
+  }
+  function practiceWipe() {
+    dialog({ title: 'Wipe all test data?', html: 'Every TEST order and cash record is deleted for good. Real records aren’t touched.', ok: 'Wipe', destructive: true })
+      .then(function (r) { if (!r) return; sapi('practiceWipe').then(function (n) { toast('Wiped ' + n.orders + ' orders, ' + n.cash + ' cash records'); loadOrders(true); loadAdmin(); state.cashRep = null; }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+  }
   function cashVoidAct(id) {
     dialog({ title: 'Void ' + id + '?', html: 'Only if it was logged by mistake. Any books go back into stock and the record is kept, marked VOID.', ok: 'Void', destructive: true,
       inputs: [{ key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }], validate: function (v) { return v.reason ? '' : 'Say why it’s being voided.'; } })
@@ -935,6 +995,105 @@
         sapi('cashVoid', [id, r.reason]).then(function (x) { state.cashDetail = x; rerender(); toast(id + ' voided'); refreshStockQuiet(); state.cashRep = null; })
           .catch(function (e) { if (!e.signedOut) toast(e.message); });
       });
+  }
+
+  /* ---------- daily cash book ---------- */
+  function todayStr() { return localDate(new Date()); }
+  function localDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function cbMoney(n, signed) { var s = money(Math.abs(n)); return signed ? (n < 0 ? '\u2212' + s : n > 0 ? '+' + s : s) : s; }
+  PAGES.cashBook = {
+    title: 'Cash book',
+    right: function () { return navBtn('refresh-cashbook', ICON.refresh, 'Refresh'); },
+    html: function (c) {
+      var seg = '';
+      if (can('cash_report')) {
+        var v = state.cbView || 'day';
+        seg = '<div class="seg" style="margin-bottom:12px">' + [['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(function (s) { return '<button data-cbview="' + s[0] + '" class="' + (v === s[0] ? 'on' : '') + '">' + s[1] + '</button>'; }).join('') + '</div>';
+        if (v !== 'day') return seg + cashBookSummaryHtml(v);
+      }
+      var B = state.cashBook; if (!B || B.date !== (c.params.date || B.date)) return seg + loadingHtml();
+      var isToday = B.date === B.today, d = new Date(B.date + 'T12:00:00');
+      var label = isToday ? 'Today' : d.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
+      var h = '<div class="cb-head">' + (B.canAnyDay ? '<button class="btn small" data-act="cb-prev" aria-label="Previous day">' + ICON.back + '</button>' : '<span></span>') +
+        '<div style="text-align:center"><div style="font-weight:700;font-size:17px">' + esc(label) + '</div><div class="faint" style="font-size:13px">' + esc(B.date) + (B.closing ? ' · closed' : B.opening ? ' · open' : ' · not opened') + '</div></div>' +
+        (B.canAnyDay && !isToday ? '<button class="btn small" data-act="cb-next" aria-label="Next day">' + ICON.chev + '</button>' : '<span style="min-width:40px"></span>') + '</div>';
+      var canAct = isToday || B.canAnyDay;
+      h += '<div class="group">' +
+        '<div class="row"><span class="grow"><span class="title">Opening float</span><span class="sub">' + (B.opening ? 'by ' + esc(B.opening.by) + ' · ' + esc(timeOf(B.opening.at)) + (B.opening.note ? ' · ' + esc(B.opening.note) : '') : 'Count the drawer when you open') + '</span></span>' +
+          (B.opening ? '<span class="value cb-num">' + money(B.opening.amount) + '</span>' + (B.canFix && canAct ? '<button class="btn small" data-act="cb-open" style="margin-left:8px">Change</button>' : '') : (canAct ? '<button class="btn small primary" data-act="cb-open">Set</button>' : '')) + '</div>' +
+        '<div class="row"><span class="grow"><span class="title">Cash in</span><span class="sub">' + B.inCount + (B.inCount === 1 ? ' payment' : ' payments') + ' taken at the desk (automatic)</span></span><span class="value cb-num cb-pos">' + cbMoney(B.inTotal, true) + '</span></div>' +
+        '<div class="row"><span class="grow"><span class="title">Cash out</span><span class="sub">' + B.outs.length + (B.outs.length === 1 ? ' entry' : ' entries') + '</span></span><span class="value cb-num' + (B.outTotal ? ' cb-neg' : '') + '">' + cbMoney(-B.outTotal, true) + '</span>' + (canAct && (!B.closing || B.canFix) ? '<button class="btn small" data-act="cb-out" style="margin-left:8px">Add</button>' : '') + '</div>' +
+        '<div class="row"><span class="grow"><span class="title">Expected in drawer</span><span class="sub">float + in \u2212 out</span></span><span class="value cb-num">' + (B.expected === null ? '\u2013' : money(B.expected)) + '</span></div>' +
+        '<div class="row"><span class="grow"><span class="title">Closing count</span><span class="sub">' + (B.closing ? 'by ' + esc(B.closing.by) + ' · ' + esc(timeOf(B.closing.at)) + (B.closing.note ? ' · ' + esc(B.closing.note) : '') : 'Count the drawer at the end of the day') + '</span></span>' +
+          (B.closing ? '<span class="value cb-num">' + money(B.closing.amount) + '</span>' + (B.canFix && canAct ? '<button class="btn small" data-act="cb-close" style="margin-left:8px">Recount</button>' : '') : (canAct && B.opening ? '<button class="btn small primary" data-act="cb-close">Count</button>' : '')) + '</div>' +
+        (B.difference !== null ? '<div class="row"><span class="grow"><span class="title">Difference</span><span class="sub">' + (B.difference === 0 ? 'Balanced' : B.difference < 0 ? 'Short' : 'Over') + '</span></span><span class="value cb-num ' + (B.difference < 0 ? 'cb-neg' : B.difference > 0 ? 'cb-pos' : '') + '">' + cbMoney(B.difference, true) + '</span></div>' : '') +
+        '</div>';
+      if (B.outs.length) h += '<div class="group-head">Cash out</div><div class="group">' + B.outs.map(function (o) {
+        return '<div class="row"><span class="grow"><span class="title">' + esc(o.note) + '</span><span class="sub">' + esc(o.by) + ' · ' + esc(timeOf(o.at)) + '</span></span><span class="value cb-num cb-neg">\u2212' + money(o.amount) + '</span>' + (B.canFix ? '<button class="link" data-act="cb-remove" data-id="' + esc(o.id) + '" style="margin-left:10px">Remove</button>' : '') + '</div>';
+      }).join('') + '</div>';
+      if (B.ins.length) h += '<div class="group-head">Cash in</div><div class="group">' + B.ins.map(function (x) {
+        return '<div class="row"><span class="grow"><span class="title">' + esc(x.cashId) + (x.name ? ' · ' + esc(titleCase(x.name)) : '') + '</span><span class="sub">' + (x.summary ? esc(x.summary) + ' · ' : '') + 'by ' + esc(firstName(x.by)) + ' · ' + esc(timeOf(x.at)) + '</span></span><span class="value cb-num">' + money(x.amount) + '</span></div>';
+      }).join('') + '</div>';
+      h += '<p class="group-foot">Cash in comes from the cash records automatically. Voided and TEST records aren’t included.' + (B.canAnyDay ? '' : ' You can see today and yesterday.') + '</p>';
+      return seg + h;
+    },
+    after: function (c) { if (!c.params.loaded) { c.params.loaded = true; loadCashBook(c.params.date || ''); } if ((state.cbView || 'day') !== 'day' && !state.cbSum) loadCashBookSummary(); }
+  };
+  function cbRange(v) {
+    var now = new Date(), t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (v === 'week') { var dow = (t0.getDay() + 6) % 7; var mon = new Date(t0.getTime() - dow * 86400000); return { from: localDate(mon), to: localDate(t0), label: 'This week (from Mon ' + mon.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) + ')' }; }
+    return { from: localDate(new Date(t0.getFullYear(), t0.getMonth(), 1)), to: localDate(t0), label: t0.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' }) };
+  }
+  function loadCashBookSummary() {
+    var r = cbRange(state.cbView); state.cbSum = null; if ($('cb-sum')) $('cb-sum').innerHTML = loadingHtml();
+    return sapi('cashBookSummary', [r.from, r.to]).then(function (S) { state.cbSum = S; if (current().page === 'cashBook') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+  }
+  function cashBookSummaryHtml(v) {
+    var S = state.cbSum, r = cbRange(v);
+    var h = '<div class="cash-sum"><div class="s-num">' + (S ? money(S.inTotal) : '\u2013') + '</div><div class="s-label">' + esc(r.label) + (S ? ' · ' + S.inCount + (S.inCount === 1 ? ' payment' : ' payments') + ' in · ' + money(S.outTotal) + ' out' + (S.daysClosed ? ' · ' + S.daysClosed + (S.daysClosed === 1 ? ' day closed' : ' days closed') + ', ' + (S.differenceTotal === 0 ? 'balanced' : (S.differenceTotal < 0 ? 'short ' : 'over ') + money(Math.abs(S.differenceTotal))) : '') : '') + '</div></div>';
+    h += '<div id="cb-sum">';
+    if (!S) return h + loadingHtml() + '</div>';
+    if (!S.days.length) return h + '<div class="empty">' + ICON.check + '<strong>Nothing yet</strong>Days with cash show up here.</div></div>';
+    h += '<div class="group">' + S.days.slice().reverse().map(function (b) {
+      var d = new Date(b.date + 'T12:00:00'), lab = d.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
+      var st = b.difference === null ? (b.opening === null ? 'not opened' : 'open, not counted') : (b.difference === 0 ? 'balanced' : (b.difference < 0 ? 'short ' : 'over ') + money(Math.abs(b.difference)));
+      return '<button class="row" data-act="cb-day" data-date="' + b.date + '"><span class="grow"><span class="title">' + esc(lab) + '</span><span class="sub">' + (b.opening === null ? '' : 'float ' + money(b.opening) + ' · ') + b.inCount + ' in' + (b.outCount ? ' · ' + b.outCount + ' out' : '') + ' · ' + esc(st) + '</span></span><span class="value cb-num ' + (b.difference !== null && b.difference < 0 ? 'cb-neg' : '') + '">' + money(b.inTotal) + '</span><span class="chev">' + ICON.chev + '</span></button>';
+    }).join('') + '</div>';
+    return h + '</div><p class="group-foot">Amount shown is cash in for the day. Tap a day to open its page.</p>';
+  }
+  function loadCashBook(date) {
+    return sapi('cashBookGet', [date || '']).then(function (B) { state.cashBook = B; var cur = current(); if (cur.page === 'cashBook') { cur.params.date = B.date; rerender(); } })
+      .catch(function (e) { if (!e.signedOut) { toast(e.message); back(); } });
+  }
+  function cbAmountDialog(title, html, ok, key, placeholder, withNote, noteRequired) {
+    var inputs = [{ key: key, type: 'number', placeholder: placeholder }];
+    if (withNote) inputs.push({ key: 'note', placeholder: noteRequired ? 'What for? (required)' : 'Note (optional)', maxlength: 120 });
+    return dialog({ title: title, html: html, ok: ok, inputs: inputs, validate: function (v) {
+      if (!/^\d{1,6}(\.\d{1,2})?$/.test(String(v[key] || '').trim())) return 'Enter an amount like 200 or 200.50.';
+      if (noteRequired && !(v.note && v.note.trim().length >= 3)) return 'Say what it was for.';
+      return '';
+    } });
+  }
+  function cbDo(fn, args, msg) {
+    sapi(fn, [state.cashBook.date].concat(args)).then(function (B) { state.cashBook = B; rerender(); if (msg) toast(msg); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+  }
+  function cashBookOpenAct() {
+    var B = state.cashBook, fix = !!B.opening;
+    cbAmountDialog(fix ? 'Change the opening float' : 'Opening float', fix ? 'Owner override: say why.' : 'How much cash is in the drawer right now?', fix ? 'Change' : 'Set', 'amount', 'e.g. 200', true, fix)
+      .then(function (r) { if (r) cbDo('cashBookOpen', [r.amount, r.note || ''], 'Float set'); });
+  }
+  function cashBookOutAct() {
+    cbAmountDialog('Cash out', 'Money taken from the drawer.', 'Add', 'amount', 'e.g. 20', true, true)
+      .then(function (r) { if (r) cbDo('cashBookOut', [r.amount, r.note], 'Cash out added'); });
+  }
+  function cashBookCloseAct() {
+    var B = state.cashBook, fix = !!B.closing;
+    cbAmountDialog(fix ? 'Recount' : 'Closing count', (fix ? 'Owner override: say why. ' : '') + 'Count everything in the drawer. Expected: <b>' + money(B.expected) + '</b>.', fix ? 'Recount' : 'Close the day', 'amount', 'e.g. ' + B.expected, true, fix)
+      .then(function (r) { if (r) cbDo('cashBookClose', [r.amount, r.note || ''], 'Day closed'); });
+  }
+  function cashBookRemoveAct(id) {
+    dialog({ title: 'Remove this entry?', html: 'Owner override. It stays in the sheet marked removed.', ok: 'Remove', destructive: true, inputs: [{ key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }], validate: function (v) { return v.reason && v.reason.trim().length >= 3 ? '' : 'Say why.'; } })
+      .then(function (r) { if (!r) return; sapi('cashBookRemove', [id, r.reason]).then(function (B) { state.cashBook = B; rerender(); toast('Removed'); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
   }
 
   /* ---------- admin: cash items (what can be paid for in cash, and the price) ---------- */
@@ -1004,7 +1163,7 @@
       '<div class="stat"><div class="s-num">' + num(s && s.pickedToday) + '</div><div class="s-label">Picked up today</div></div>' +
       '<div class="stat"><div class="s-num">' + (s ? money(s.moneyWeek) : '\u2013') + '</div><div class="s-label">Confirmed this week' + (s ? ' \u00b7 ' + s.confirmedWeek + ' orders' : '') + '</div></div>' +
       '<div class="stat"><div class="s-num">' + num(s && s.ordersToday) + '</div><div class="s-label">Orders today</div></div>' +
-      '<button class="stat" data-act="cash-today"><div class="s-num">' + (state.cashToday ? money(state.cashToday.total) : '\u2013') + '</div><div class="s-label">Cash today' + (state.cashToday ? ' \u00b7 ' + state.cashToday.count : '') + '</div></button>' +
+      (can('cash_report') ? '<button class="stat" data-act="cash-today"><div class="s-num">' + (state.cashToday ? money(state.cashToday.total) : '\u2013') + '</div><div class="s-label">Cash today' + (state.cashToday ? ' \u00b7 ' + state.cashToday.count : '') + '</div></button>' : '') +
       '</div>';
     if (state.stock && state.stock.low.length) h += '<div style="margin-top:14px">' + lowBanner() + '</div>';
     h += '<div class="group-head">People</div><div class="group">' +
@@ -1014,12 +1173,16 @@
       rowLink('activity', ICON.clock, 'violet', 'Activity', 'Who did what') +
       '<button class="row" data-act="tab" data-tab="stock"><span class="ic amber">' + ICON.stock + '</span><span class="grow"><span class="title">Stock</span></span><span class="value">' + (state.stock ? state.stock.items.filter(function (i) { return i.tracked; }).map(function (i) { return i.onHand; }).join(' · ') : '') + '</span><span class="chev">' + ICON.chev + '</span></button></div>';
     h += '<div class="group-head">Setup</div><div class="group">' +
-      rowLink('settings', ICON.gear, 'grey', 'Settings', 'Prices, e-transfer email') +
-      rowLink('cashItems', ICON.cash, 'green', 'Cash items', 'CPR, GPA, NACC prices') +
+      (can('settings') ? rowLink('settings', ICON.gear, 'grey', 'Settings', 'Prices, e-transfer email') + rowLink('cashItems', ICON.cash, 'green', 'Cash items', 'CPR, GPA, NACC prices') : '') +
       '<div class="row"><span class="ic">' + ICON.sheet + '</span><span class="grow"><span class="title">Accounting workbook</span><span class="sub">' +
       (l ? (l.ok ? esc(l.sourceName || '') + ' · ' + l.students + ' students' : 'Problem: ' + esc(l.error)) : 'Checking…') + '</span></span>' +
       '<button class="btn small" data-act="reread">Re-read</button></div></div>';
     h += '<p class="group-foot">Drop the newest workbook into Drive › PRIME Orders › PRIME PSW Accounting Workbook, then tap Re-read. The app also picks it up by itself within 6 hours.</p>';
+    if (can('practice')) {
+      h += '<div class="group-head">Owner</div><div class="group">' +
+        '<div class="row"><span class="ic amber">' + ICON.warn + '</span><span class="grow"><span class="title">Practice mode</span><span class="sub">' + (state.practice ? 'ON: orders and cash made now are tagged TEST, not counted, no stock, pings or emails.' : 'Try the app safely. Everything made while it’s on is tagged TEST and can be wiped.') + '</span></span><label class="switch"><input type="checkbox" data-act="practice-toggle"' + (state.practice ? ' checked' : '') + '><span></span></label></div>' +
+        '<button class="row danger" data-act="practice-wipe"><span class="grow"><span class="title">Wipe test data</span><span class="sub">Deletes every TEST order and cash record. Real records are never touched.</span></span></button></div>';
+    }
     return h;
   }
   function rowLink(page, icon, color, title, value) {
@@ -1029,7 +1192,7 @@
   function loadAdmin() {
     var b = document.querySelector('[data-act="refresh-admin"]'); if (b) b.classList.add('spin');
     var today = cashRangeDates({ key: 'today' });
-    return Promise.all([sapi('adminStats'), sapi('adminStaffList'), sapi('cashReport', [today.from, today.to])]).then(function (r) {
+    return Promise.all([sapi('adminStats'), sapi('adminStaffList'), can('cash_report') ? sapi('cashReport', [today.from, today.to]) : Promise.resolve(null)]).then(function (r) {
       state.stats = r[0]; state.stock = r[0].stock; state.lookup = r[0].lookup; state.staff = r[1]; state.cashToday = r[2];
       if ($('admin-body')) $('admin-body').innerHTML = adminBody(); renderTabbar();
     }).catch(function (e) { if (!e.signedOut) toast(e.message); })
@@ -1067,28 +1230,31 @@
     html: function (c) {
       var u = staffByName(c.params.username); if (!u) return loadingHtml();
       var mine = u.username === state.user.username, roles = state.staff.roles;
+      var locked = u.role === 'owner' || ((u.role === 'admin') && !can('manage_admins'));   // server enforces; the app just hides what can't happen
       var pinCell = u.hasPin ? (state.revealPin[u.username] ? '<span class="pin-reveal">' + esc(u.pin) + '</span> <button class="link" data-act="pin-hide" data-username="' + esc(u.username) + '">Hide</button>'
         : '•••• <button class="link" data-act="pin-show" data-username="' + esc(u.username) + '">Show</button>') : '<span class="faint">Picks one at first sign-in</span>';
       var h = '<div class="profile"><span class="avatar lg">' + esc(initials(u.name)) + '</span><div class="p-name">' + esc(u.name) + '</div><div class="p-sub">@' + esc(u.username) + ' · ' + esc(u.roleLabel) + '</div><div style="margin-top:8px">' + staffChip(u) + '</div></div>';
       h += '<div class="group-head">Account</div><div class="group">' +
         '<button class="row" data-act="staff-rename" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Name</span></span><span class="value">' + esc(u.name) + '</span><span class="chev">' + ICON.chev + '</span></button>' +
-        '<div class="row"><span class="grow"><span class="title">Role</span>' + (mine ? '<span class="sub">You can’t change your own role.</span>' : '') + '</span><span class="segctl">' + roles.map(function (r) {
+        (u.role === 'owner' ? '<div class="row"><span class="grow"><span class="title">Role</span><span class="sub">The owner account. It can’t be changed or removed.</span></span><span class="value">Owner</span></div>'
+        : locked ? '<div class="row"><span class="grow"><span class="title">Role</span><span class="sub">Only the owner can change an admin.</span></span><span class="value">' + esc(u.roleLabel) + '</span></div>'
+        : '<div class="row"><span class="grow"><span class="title">Role</span>' + (mine ? '<span class="sub">You can’t change your own role.</span>' : '') + '</span><span class="segctl">' + roles.map(function (r) {
           return '<button data-act="staff-role" data-username="' + esc(u.username) + '" data-role="' + r.key + '" class="' + (u.role === r.key ? 'on' : '') + '"' + (mine ? ' disabled' : '') + '>' + esc(r.label) + '</button>';
-        }).join('') + '</span></div>' +
+        }).join('') + '</span></div>') +
         '<div class="row"><span class="grow"><span class="title">PIN</span></span><span class="value">' + pinCell + '</span></div>' +
         '<div class="row"><span class="grow"><span class="title">Last sign-in</span></span><span class="value">' + esc(u.lastLogin ? ago(u.lastLogin) : 'Never') + '</span></div>' +
         '<div class="row"><span class="grow"><span class="title">Signed in on</span></span><span class="value">' + u.phones + (u.phones === 1 ? ' phone' : ' phones') + '</span></div>' +
         '<div class="row"><span class="grow"><span class="title">Added</span></span><span class="value">' + esc(when(u.createdAt)) + (u.createdBy && u.createdBy !== 'setup' ? ' by ' + esc(u.createdBy) : '') + '</span></div>' +
         '</div>';
       h += '<div class="group-head">Actions</div><div class="group">' +
-        '<button class="row accent" data-act="staff-reset" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Reset password</span><span class="sub">Makes a new password and signs them out of every phone.</span></span></button>';
-      if (!mine) {
+        (locked && !mine ? '' : '<button class="row accent" data-act="staff-reset" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Reset password</span><span class="sub">Makes a new password and signs them out of every phone.</span></span></button>');
+      if (!mine && !locked) {
         h += u.status === 'active'
           ? '<button class="row danger" data-act="staff-disable" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Disable account</span><span class="sub">Signs them out now. You can turn it back on later.</span></span></button>'
           : '<button class="row accent" data-act="staff-enable" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Enable account</span></span></button>';
         h += '<button class="row danger" data-act="staff-remove" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Remove</span><span class="sub">Deletes the login. Their past actions stay in Activity.</span></span></button>';
       }
-      return h + '</div>' + (mine ? '<p class="group-foot">This is you. Change your own password and PIN under Me.</p>' : '');
+      return h + '</div>' + (mine ? '<p class="group-foot">This is you. Change your own password and PIN under Me.</p>' : locked ? '<p class="group-foot">Only the owner can manage this account.</p>' : '');
     }
   };
   function staffUpdate(username, changes, msg) {
@@ -1164,7 +1330,7 @@
         Array.prototype.forEach.call($('ns-role').children, function (x) { x.classList.toggle('on', x === b); });
         $('ns-role-help').textContent = b.dataset.role === 'admin' ? 'Admin: everything, including confirming payments, staff accounts and settings.' : 'Reception: sees orders that are ready, hands them out, sees stock.';
       });
-      setTimeout(function () { $('ns-name').focus(); }, 60);
+      setTimeout(function () { var el = $('ns-name'); if (el) el.focus(); }, 60);
     }
   };
   function createStaff() {
@@ -1313,7 +1479,7 @@
         '<p class="group-foot">Your other phones will be signed out. This phone stays signed in and your PIN doesn’t change.</p>' +
         '<p id="pw-error" class="error" hidden></p><button id="pw-go" class="btn primary block" data-act="password-save">Change password</button>';
     },
-    after: function () { setTimeout(function () { $('pw-old').focus(); }, 60); }
+    after: function () { setTimeout(function () { var el = $('pw-old'); if (el) el.focus(); }, 60); }
   };
   function savePassword() {
     var o = $('pw-old').value, n = $('pw-new').value;
@@ -1367,9 +1533,12 @@
   /* =================================================================== events */
   function initMain() {
     $('tabbar').addEventListener('click', function (e) { var b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
+    $('page').addEventListener('change', function (e) { if (e.target.dataset && e.target.dataset.act === 'practice-toggle') practiceToggle(e.target.checked); });
     $('v-main').addEventListener('click', function (e) {
       var s = e.target.closest('[data-seg]');
       if (s && s.closest('.seg')) { state.seg = s.dataset.seg; set(LS.seg, state.seg); updateOrders(); return; }
+      var cv = e.target.closest('[data-cbview]');
+      if (cv) { state.cbView = cv.dataset.cbview; state.cbSum = null; rerender(); if (state.cbView !== 'day') loadCashBookSummary(); return; }
       var cr = e.target.closest('[data-cashrange]');
       if (cr) { state.cashRange = cr.dataset.cashrange === 'custom' ? { key: 'custom', from: state.cashRange.from || '', to: state.cashRange.to || '' } : { key: cr.dataset.cashrange }; rerender(); if (state.cashRange.key !== 'custom') loadCashReport(); return; }
       var af = e.target.closest('[data-actfilter]');
@@ -1412,10 +1581,21 @@
         case 'sig-clear': if (pads[b.dataset.sig]) pads[b.dataset.sig].clear(); return;
         case 'cash-today': state.cashRange = { key: 'today' }; state.cashRep = null; return setTab('cash');
         case 'refresh-cash': return can('cash_report') ? loadCashReport() : loadCashMine();
+        case 'refresh-cashbook': return (state.cbView || 'day') === 'day' ? loadCashBook(state.cashBook ? state.cashBook.date : '') : loadCashBookSummary();
         case 'ci-add': state.cashItems.items.push({ id: '', name: '', group: '', price: '', wb: '', on: true }); rerender(); setTimeout(function () { var els = document.querySelectorAll('[data-ci-name]'); if (els.length) els[els.length - 1].focus(); }, 0); return;
         case 'ci-save': return cashItemsSave(b);
         case 'cash-custom': state.cashRange = { key: 'custom', from: $('cr-from').value, to: $('cr-to').value }; return loadCashReport();
         case 'cash-void': return cashVoidAct(b.dataset.cash);
+        case 'cash-edit': return cashEditAct(b.dataset.cash);
+        case 'cash-unvoid': return cashUnvoidAct(b.dataset.cash);
+        case 'practice-wipe': return practiceWipe();
+        case 'cashbook': return go('cashBook', { date: '' });
+        case 'cb-prev': case 'cb-next': { var d = new Date((state.cashBook ? state.cashBook.date : todayStr()) + 'T12:00:00'); d.setDate(d.getDate() + (b.dataset.act === 'cb-prev' ? -1 : 1)); return go('cashBook', { date: localDate(d) }); }
+        case 'cb-day': state.cbView = 'day'; return go('cashBook', { date: b.dataset.date });
+        case 'cb-open': return cashBookOpenAct();
+        case 'cb-out': return cashBookOutAct();
+        case 'cb-close': return cashBookCloseAct();
+        case 'cb-remove': return cashBookRemoveAct(b.dataset.id);
         case 'install': return install();
         case 'revoke':
           return sapi('staffRevokeSession', [b.dataset.id]).then(function (r) { state.me = r; state.loadedAt.me = Date.now(); rerender(); toast('That phone is signed out'); }).catch(function (e3) { if (!e3.signedOut) toast(e3.message); });

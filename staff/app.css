@@ -115,6 +115,12 @@ button.row:active, a.row:active { background: var(--fill); }
 .page { max-width: 640px; margin: 0 auto; padding: 0 16px calc(var(--tabbar-h) + 28px + var(--safe-b)); animation: fade .18s ease-out; }
 .page.sub { padding-top: 8px; }
 .large { font-size: 34px; font-weight: 700; letter-spacing: -.025em; margin: 4px 4px 12px; line-height: 1.1; }
+.practice-bar { position: sticky; top: 0; z-index: 30; background: #f5c400; color: #1b1b1b; font-size: 13.5px; text-align: center; padding: 6px 14px; border-bottom: 1px solid rgba(0,0,0,.08); }
+.chip.test { background: #f5c400; color: #1b1b1b; }
+.row.blocked.ov { opacity: 1; } .row.blocked.ov .title::after { content: ' · needs override'; color: var(--amber); font-size: 12.5px; font-weight: 600; }
+.cb-num { font-variant-numeric: tabular-nums; font-weight: 700; } .cb-neg { color: var(--red); } .cb-pos { color: var(--accent); }
+.cb-head { display: flex; align-items: center; justify-content: space-between; margin: 4px 4px 12px; }
+.cb-head .btn.small { min-width: 40px; padding: 6px 10px; }
 .offline { max-width: 640px; margin: 8px auto 0; padding: 10px 14px; border-radius: var(--r-sm); background: var(--amber-soft); color: var(--amber); font-size: 14px; font-weight: 500; width: calc(100% - 32px); }
 
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; justify-content: space-around;
