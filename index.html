@@ -61,17 +61,10 @@
   .error { color:var(--red); font-size:14px; margin:12px 4px 0; font-weight:500; }
   .success { color:var(--accent-ink); font-size:15px; margin-top:10px; font-weight:500; }
   .hidden { display:none !important; }
-  .tabs { display:flex; gap:2px; margin-bottom:12px; overflow-x:auto; padding:3px; background:var(--grey-bg); border-radius:11px; }
-  .tabs button { flex:1 0 auto; font-size:14px; padding:8px 12px; border-radius:9px; background:transparent; color:var(--muted); }
-  .tabs button.active { background:var(--panel); color:var(--ink); box-shadow:0 1px 3px rgba(16,24,40,.12); }
   .order { border-top:1px solid var(--line-soft); padding:14px 0; }
   .order:first-child { border-top:none; padding-top:0; }
   .order .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
   .order .name { font-weight:700; font-size:17px; }
-  .order .when { font-size:13px; color:var(--faint); white-space:nowrap; }
-  .order .amt { font-size:20px; font-weight:700; }
-  .order .pc { font-family:var(--mono); font-weight:700; letter-spacing:3px; color:var(--accent-ink); }
-  .dim { opacity:.55; }
   .link { color:var(--accent); background:none; border:none; padding:0; font-size:15px; font-weight:500; }
   .center { text-align:center; }
   .spinner { text-align:center; padding:32px; color:var(--muted); }
@@ -82,7 +75,6 @@
 <div class="wrap">
   <header>
     <h1 id="brand">PRIME</h1>
-    <button id="staffBtn" class="small" onclick="go('staff')">Staff</button>
   </header>
 
   <div id="loading" class="spinner">Loading…</div>
@@ -154,38 +146,7 @@
     <p class="center"><button class="link" onclick="go('order')">Place another order</button></p>
   </section>
 
-  <!-- ================= STAFF: login ================= -->
-  <section id="v-staff" class="hidden">
-    <div class="card">
-      <h2>Staff sign in</h2>
-      <label for="st-pin">PIN</label>
-      <input id="st-pin" type="password" inputmode="numeric" autocomplete="off" onkeydown="if(event.key==='Enter')staffLogin()">
-      <div id="st-error" class="error hidden"></div>
-      <button class="primary" onclick="staffLogin()">Sign in</button>
-    </div>
-    <p class="center"><button class="link" onclick="go('order')">Back to student page</button></p>
-  </section>
-
-  <!-- ================= STAFF: dashboard ================= -->
-  <section id="v-dash" class="hidden">
-    <div class="tabs" id="tabs"></div>
-    <div id="dash-error" class="error hidden"></div>
-    <div class="card" id="dash-list"></div>
-    <div class="card hidden" id="dash-settings">
-      <h2>Settings</h2>
-      <label>School name</label><input type="text" id="set-school_name">
-      <label>E-transfer email (students send money here)</label><input type="email" id="set-etransfer_email">
-      <label>Sorrentino price</label><input type="number" id="set-price_sorrentino" min="0" step="1">
-      <label>Palliative bundle price</label><input type="number" id="set-price_palliative" min="0" step="1">
-      <label>Pickup note shown to students</label><textarea id="set-pickup_note"></textarea>
-      <label>Admin PIN (you)</label><input type="text" id="set-admin_pin" autocomplete="off">
-      <label>Reception PIN</label><input type="text" id="set-reception_pin" autocomplete="off">
-      <div id="set-error" class="error hidden"></div>
-      <div id="set-ok" class="success hidden"></div>
-      <button class="primary" onclick="saveSettings()">Save settings</button>
-    </div>
-    <div class="row"><button class="small" onclick="loadDash()">Refresh</button><button class="small" onclick="staffLogout()">Sign out</button></div>
-  </section>
+  <p class="center" style="margin-top:28px"><a href="staff/" style="font-size:13px;color:var(--faint);text-decoration:none">Staff</a></p>
 </div>
 
 <script src="config.js"></script>
@@ -212,7 +173,7 @@
 <script>
   var INITIAL = window.__INITIAL__;
   var BASE_URL = window.__BASE_URL__;
-  var state = { cfg:null, token:null, order:null, pin:null, role:null, tab:'payments', orders:[], poll:null, matches:[], match:null };
+  var state = { cfg:null, token:null, order:null, poll:null, matches:[], match:null };
 
   /* ---------- plumbing ---------- */
   function call(fn) {
@@ -254,16 +215,13 @@
     } catch (e) {}
   }
 
-  var VIEWS = ['order', 'find', 'status', 'staff', 'dash'];
+  var VIEWS = ['order', 'find', 'status'];
   function go(view) {
     stopPoll();
     VIEWS.forEach(function (v) { $('v-' + v).classList.toggle('hidden', v !== view); });
     $('loading').classList.add('hidden');
-    $('staffBtn').classList.toggle('hidden', view === 'staff' || view === 'dash');
     if (view === 'status') startPoll();
-    if (view === 'dash') { loadDash(); state.poll = setInterval(loadDash, 30000); }
-    if (view === 'staff' || view === 'dash') setUrlParams({ staff: '1' });
-    else if (view !== 'status') setUrlParams({});
+    else setUrlParams({});
     window.scrollTo(0, 0);
   }
 
@@ -375,96 +333,6 @@
   }
   function openFound(token) { call('getOrder', token).then(function (o) { if (o) showOrder(o); }); }
 
-  /* ---------- staff ---------- */
-  function staffLogin() {
-    showErr('st-error', '');
-    var pin = $('st-pin').value.trim();
-    if (!pin) return showErr('st-error', 'Enter your PIN.');
-    call('staffLogin', pin).then(function (r) {
-      state.pin = pin; state.role = r.role; state.tab = 'payments';
-      try { sessionStorage.setItem('bo_pin', pin); } catch (e) {}
-      $('st-pin').value = '';
-      go('dash');
-    }).catch(function (e) { showErr('st-error', e.message || String(e)); });
-  }
-  function staffLogout() { state.pin = null; state.role = null; try { sessionStorage.removeItem('bo_pin'); } catch (e) {} go('order'); }
-  function setTab(t) { state.tab = t; renderDash(); }
-  function loadDash() {
-    if (!state.pin) return go('staff');
-    call('staffList', state.pin).then(function (r) {
-      state.role = r.role; state.orders = r.orders; showErr('dash-error', ''); renderDash();
-    }).catch(function (e) { showErr('dash-error', e.message || String(e)); if (/PIN/.test(String(e.message))) staffLogout(); });
-  }
-  function renderDash() {
-    var isAdmin = state.role === 'admin';
-    var tabs = isAdmin ? [['payments', 'To confirm'], ['ready', 'Ready'], ['done', 'Done'], ['all', 'All'], ['settings', 'Settings']]
-                       : [['ready', 'Ready for pickup'], ['done', 'Picked up']];
-    if (!tabs.some(function (t) { return t[0] === state.tab; })) state.tab = tabs[0][0];
-    var counts = { payments:0, ready:0 };
-    state.orders.forEach(function (o) { if (o.status === 'NEW' || o.status === 'SENT') counts.payments++; if (o.status === 'READY') counts.ready++; });
-    $('tabs').innerHTML = tabs.map(function (t) {
-      var n = counts[t[0]] ? ' (' + counts[t[0]] + ')' : '';
-      return '<button class="' + (state.tab === t[0] ? 'active' : '') + '" onclick="setTab(\'' + t[0] + '\')">' + esc(t[1]) + n + '</button>';
-    }).join('');
-    var settings = state.tab === 'settings';
-    $('dash-settings').classList.toggle('hidden', !settings);
-    $('dash-list').classList.toggle('hidden', settings);
-    if (settings) return loadSettings();
-    var list = state.orders.filter(function (o) {
-      if (state.tab === 'payments') return o.status === 'NEW' || o.status === 'SENT';
-      if (state.tab === 'ready') return o.status === 'READY';
-      if (state.tab === 'done') return o.status === 'PICKED_UP';
-      return true;
-    });
-    if (state.tab === 'payments') list.sort(function (a, b) { return (b.status === 'SENT') - (a.status === 'SENT') || b.orderNo - a.orderNo; });
-    if (!list.length) { $('dash-list').innerHTML = '<p class="muted center">Nothing here right now.</p>'; return; }
-    $('dash-list').innerHTML = list.map(function (o) {
-      var h = '<div class="order' + (o.status === 'CANCELLED' ? ' dim' : '') + '">' +
-        '<div class="top"><span class="name">' + esc(o.name) + '</span><span class="when">' + esc(when(o.createdAt)) + '</span></div>' +
-        '<div class="muted">#' + o.orderNo + ' · ' + esc(o.studentNumber) + ' · ' + esc(o.batch) + '</div>' +
-        '<div style="margin-top:4px">' + esc(items(o)) + '</div>' +
-        '<div class="top" style="margin-top:6px"><span class="amt">' + money(o.amount) + '</span>' + badge(o) + '</div>';
-      if (o.status === 'SENT') h += '<div class="muted">Student says sent ' + esc(when(o.sentAt)) + ' · Check the e-transfer email for <strong>' + money(o.amount) + '</strong> with "Order ' + o.orderNo + '"</div>';
-      if (o.status === 'NEW' && isAdmin) h += '<div class="muted">Student hasn\'t tapped "sent" yet. You can still confirm if the money arrived.</div>';
-      if (o.status === 'READY') h += '<div style="margin-top:6px">Pickup code: <span class="pc">' + esc(o.pickupCode) + '</span></div>';
-      if (o.studentNote) h += '<div class="muted">Student note: ' + esc(o.studentNote) + '</div>';
-      if (o.staffNote) h += '<div class="muted">Staff note: ' + esc(o.staffNote) + '</div>';
-      if (o.phone || o.email) h += '<div class="muted">' + esc([o.phone, o.email].filter(Boolean).join(' · ')) + '</div>';
-      var btns = '';
-      if (isAdmin && (o.status === 'NEW' || o.status === 'SENT')) btns += '<button class="small primary" style="margin-top:0" onclick="act(\'confirmPayment\',' + o.orderNo + ', this)">Confirm payment, send code</button>';
-      if (o.status === 'READY') btns += '<button class="small" onclick="act(\'markPickedUp\',' + o.orderNo + ', this)">Picked up</button>';
-      if (isAdmin && o.status !== 'PICKED_UP' && o.status !== 'CANCELLED') btns += '<button class="small" onclick="cancelOrder(' + o.orderNo + ', this)">Cancel</button>';
-      if (btns) h += '<div class="row">' + btns + '</div>';
-      return h + '</div>';
-    }).join('');
-  }
-  function act(fn, orderNo, btn) {
-    if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
-    showErr('dash-error', '');
-    call(fn, state.pin, orderNo).then(function () { loadDash(); }).catch(function (e) { showErr('dash-error', e.message || String(e)); loadDash(); });
-  }
-  function cancelOrder(orderNo, btn) {
-    if (btn && btn.dataset.armed !== '1') {
-      btn.dataset.armed = '1'; btn.textContent = 'Tap again to cancel #' + orderNo; btn.style.color = 'var(--red)';
-      setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = 'Cancel'; btn.style.color = ''; } }, 4000);
-      return;
-    }
-    act('cancelOrder', orderNo, btn);
-  }
-  var SETTING_KEYS = ['school_name', 'etransfer_email', 'price_sorrentino', 'price_palliative', 'pickup_note', 'admin_pin', 'reception_pin'];
-  function loadSettings() {
-    call('getSettings', state.pin).then(function (s) { SETTING_KEYS.forEach(function (k) { $('set-' + k).value = s[k] || ''; }); showErr('set-error', ''); showErr('set-ok', ''); })
-      .catch(function (e) { showErr('set-error', e.message || String(e)); });
-  }
-  function saveSettings() {
-    var s = {}; SETTING_KEYS.forEach(function (k) { s[k] = $('set-' + k).value; });
-    showErr('set-error', ''); showErr('set-ok', '');
-    call('saveSettings', state.pin, s).then(function (saved) {
-      state.pin = saved.admin_pin; try { sessionStorage.setItem('bo_pin', state.pin); } catch (e) {}
-      showErr('set-ok', 'Saved.'); return call('getPublicConfig');
-    }).then(function (cfg) { if (cfg) applyConfig(cfg); }).catch(function (e) { showErr('set-error', e.message || String(e)); });
-  }
-
   /* ---------- boot ---------- */
   function applyConfig(cfg) {
     state.cfg = cfg;
@@ -479,11 +347,7 @@
     .catch(function () { return state.cfg; });
   function boot() {
     var token = String(INITIAL.o || '').trim();
-    var savedPin = null; try { savedPin = sessionStorage.getItem('bo_pin'); } catch (e) {}
-    if (INITIAL.staff !== undefined) {
-      if (savedPin) { state.pin = savedPin; call('staffLogin', savedPin).then(function (r) { state.role = r.role; go('dash'); }).catch(function () { go('staff'); }); }
-      else go('staff');
-    } else if (token) {
+    if (token) {
       state.token = token;
       call('getOrder', token).then(function (o) { if (o) showOrder(o); else go('order'); }).catch(function () { go('order'); });
     } else go('order');
