@@ -47,6 +47,7 @@ code { font-family: var(--mono); font-size: .88em; background: var(--fill); padd
 .btn.danger { background: var(--red-soft); color: var(--red); }
 .btn.plain { background: transparent; color: var(--accent); padding-left: 8px; padding-right: 8px; }
 .btn.block { display: flex; width: 100%; margin-top: 20px; min-height: 50px; font-size: 17px; }
+.btn svg { width: 18px; height: 18px; flex: none; }
 .btn.small { min-height: 34px; padding: 6px 12px; font-size: 14px; border-radius: 9px; }
 .link { color: var(--accent); font-size: 15px; font-weight: 500; padding: 8px; }
 .link.danger { color: var(--red); }
@@ -280,3 +281,43 @@ button.stat:active { background: var(--panel-2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { *, *::before { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 @media (min-width: 900px) { .page { padding-top: 8px; } }
+
+/* ---------- cash at the desk ---------- */
+.large-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.large-row .large { margin-right: auto; }
+.cash-btn { background: var(--accent); color: #fff; }
+.cash-btn svg { width: 16px; height: 16px; }
+.lead { color: var(--muted); font-size: 15px; margin: 0 4px 4px; }
+.banner.green { background: var(--accent-soft); color: var(--accent-ink); }
+label.row { cursor: pointer; }
+label.row input[type=checkbox], label.row input[type=radio] { width: 22px; height: 22px; accent-color: var(--accent); flex: none; margin: 0; }
+.row.blocked { opacity: .55; }
+.row .sub.warn { color: var(--amber); }
+.row .value.strong { color: var(--ink); font-weight: 700; }
+.row.void .title, .row.void .value { text-decoration: line-through; color: var(--faint); }
+.cash-total { display: flex; justify-content: space-between; align-items: baseline; margin: 18px 4px 0; font-size: 17px; }
+.cash-total b { font-size: 28px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sig { background: #fff; border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden; border: 1px solid var(--sep); }
+.sig canvas { display: block; width: 100%; height: 150px; touch-action: none; background: #fff; cursor: crosshair;
+  background-image: linear-gradient(to right, #d6dcd9 50%, transparent 0); background-size: 10px 1px; background-repeat: repeat-x; background-position: 0 112px; }
+.sig-foot { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px 6px 16px; border-top: 1px solid #e8ecea; font-size: 13.5px; color: #6b7a86; background: #fff; }
+.sig-view { background: #fff; border-radius: var(--r); box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; align-items: center; border: 1px solid var(--sep); }
+.sig-view img { width: 100%; max-width: 480px; height: auto; display: block; }
+.sig-view span { font-size: 13px; color: #6b7a86; margin-top: 4px; }
+.cash-sum { background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow); padding: 18px 16px; margin-top: 4px; }
+.cash-sum .s-num { font-size: 40px; font-weight: 700; letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.05; }
+.cash-sum .s-label { color: var(--muted); font-size: 14.5px; margin-top: 4px; }
+.ic.green { background: var(--accent); }
+
+/* ---------- cash items editor ---------- */
+.row.ci { gap: 10px; }
+.row.ci.off .ci-name, .row.ci.off .ci-price { opacity: .45; }
+.ci-name { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 6px 8px; border: 1px solid var(--sep); border-radius: 8px; background: var(--panel); color: var(--ink); }
+.ci-price { display: flex; align-items: center; gap: 2px; color: var(--muted); font-weight: 600; }
+.ci-price input { width: 72px; font: inherit; font-size: 16px; padding: 6px 8px; border: 1px solid var(--sep); border-radius: 8px; background: var(--panel); color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.switch { position: relative; width: 44px; height: 26px; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; background: #d1d1d6; border-radius: 13px; transition: background .15s; }
+.switch span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(18px); }

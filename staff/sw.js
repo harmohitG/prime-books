@@ -1,5 +1,7 @@
 /* PRIME (Staff) service worker: caches the app shell so the icon opens instantly and works offline (read-only). */
-var CACHE = 'prime-staff-v2';
+// Push notifications (OneSignal). Wrapped so the app still works offline or if the CDN is unreachable.
+try { importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js'); } catch (e) {}
+var CACHE = 'prime-staff-v3';
 var SHELL = ['./', './index.html', './app.css', './app.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', function (e) {

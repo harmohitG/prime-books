@@ -14,7 +14,9 @@
     orders: [], ordersAt: null, lookup: null, stock: null, stockLogRows: null,
     seg: null, search: '', openMore: {},
     stats: null, staff: null, activity: null, actFilter: 'all', settings: null, me: null, revealPin: {},
-    timer: null, hiddenAt: 0, busy: false, deferredInstall: null, pin: { mode: 'unlock', digits: '', first: '', busy: false }, loadedAt: {}
+    timer: null, hiddenAt: 0, busy: false, deferredInstall: null, pin: { mode: 'unlock', digits: '', first: '', busy: false }, loadedAt: {},
+    push: null, os: null, pushState: 'off', pendingOrder: null,
+    cash: null, cashRange: { key: 'today' }, cashRep: null, cashDetail: null, cashToday: null, cashMine: null, cashItems: null
   };
   /** true (and marks it) if `key` hasn't been loaded in the last `ms`: stops pages that re-render after loading from loading again. */
   function stale(key, ms) { var t = state.loadedAt[key] || 0; if (Date.now() - t < (ms || 15000)) return false; state.loadedAt[key] = Date.now(); return true; }
@@ -25,7 +27,7 @@
   function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function set(k, v) { try { if (v === null || v === undefined) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function money(n) { return '$' + Number(n || 0).toLocaleString('en-CA'); }
+  function money(n) { n = Number(n || 0); var cents = Math.round(n * 100) % 100 !== 0; return '$' + n.toLocaleString('en-CA', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 }); }
   function d(iso) { var x = new Date(iso); return isNaN(x) ? null : x; }
   function sameDay(a, b) { return a.toDateString() === b.toDateString(); }
   function timeOf(iso) { var x = d(iso); return x ? x.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''; }
@@ -95,6 +97,8 @@
     phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>',
     box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4-8.5 4-8.5-4z"/><path d="M3.5 7.5v9l8.5 4 8.5-4v-9"/><path d="M12 11.5v9"/></svg>',
+    cash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/></svg>'
   };
 
@@ -133,8 +137,10 @@
     stopPolling();
     state.token = null; state.user = null; state.unlocked = false; state.orders = []; state.ordersAt = null; state.stock = null; state.stockLogRows = null;
     state.stats = null; state.staff = null; state.activity = null; state.settings = null; state.me = null; state.stack = []; state.openMore = {}; state.revealPin = {}; state.loadedAt = {};
+    state.cash = null; state.cashRep = null; state.cashDetail = null; state.cashToday = null; state.cashMine = null;
     set(LS.token, null); set(LS.user, null);
     try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) {}
+    pushLogout();
   }
   var signingOut = false;
   function signedOut(msg) {
@@ -268,6 +274,7 @@
   /* =================================================================== main shell */
   function tabsFor() {
     var t = [{ key: 'orders', label: 'Orders', icon: ICON.orders }];
+    if (can('cash_take')) t.push({ key: 'cash', label: 'Cash', icon: ICON.cash });
     if (can('stock_view')) t.push({ key: 'stock', label: 'Stock', icon: ICON.stock });
     if (can('admin')) t.push({ key: 'admin', label: 'Admin', icon: ICON.admin });
     t.push({ key: 'me', label: 'Me', icon: ICON.me });
@@ -438,7 +445,7 @@
     right: function () { return navBtn('refresh', ICON.refresh, 'Refresh'); },
     html: function () {
       if (!segsFor().some(function (s) { return s[0] === state.seg; })) state.seg = segsFor()[0][0];
-      return '<h1 class="large">Orders</h1><div id="orders-top"></div>' +
+      return '<div class="large-row"><h1 class="large">Orders</h1></div><div id="orders-top"></div>' +
         '<div class="search">' + ICON.search + '<input id="search" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Name, pickup code or order #" value="' + esc(state.search) + '">' +
         (state.search ? '<button class="clear" data-act="clear-search" aria-label="Clear">✕</button>' : '') + '</div>' +
         '<div id="orders-list" class="list"></div><p class="foot" id="orders-foot"></p>';
@@ -460,6 +467,8 @@
       state.orders = r.orders; state.ordersAt = new Date(); state.lookup = r.lookup; if (r.stock) state.stock = r.stock;
       var roleChanged = state.user && r.me && (r.me.role !== state.user.role);
       state.user = r.me; set(LS.user, JSON.stringify(r.me));
+      if (r.push && (can('push_orders') || can('push_ready'))) initPush(r.push); else state.push = null;
+      if (state.pendingOrder) openPendingOrder();
       if (roleChanged) { state.stack = []; if (!tabsFor().some(function (t) { return t.key === state.tab; })) state.tab = 'orders'; rerender(); }
       else { updateOrders(); renderTabbar(); if (current().page === 'stock' && !state.busy) updateStock(); }
     }).catch(function (e) { if (!silent && !e.signedOut) toast(e.message); })
@@ -495,6 +504,67 @@
       dialog({ title: 'Staff note', html: 'Only staff see this.', ok: 'Save', inputs: [{ key: 'note', value: o.staffNote || '', placeholder: 'e.g. picked up by her sister', maxlength: 300, textarea: true }] })
         .then(function (r) { if (r) runOrderAction(null, 'saveStaffNote', [o.orderNo, r.note || ''], function () { toast('Note saved'); }); });
     }
+  }
+
+  /* =================================================================== notifications (OneSignal) */
+  function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function appDir() { return location.pathname.replace(/[^\/]*$/, ''); }            // e.g. /prime-books/staff/
+  function initPush(cfg) {
+    if (state.push && state.push.pushId === cfg.pushId && state.push.appId === cfg.appId) return;
+    state.push = cfg;
+    if (!pushSupported()) { state.pushState = isIOS() && !standalone() ? 'needs-home' : 'unsupported'; return; }
+    if (isIOS() && !standalone()) { state.pushState = 'needs-home'; return; }
+    state.pushState = 'loading';
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(function (OneSignal) {
+      return OneSignal.init({ appId: cfg.appId, serviceWorkerPath: appDir().replace(/^\//, '') + 'sw.js', serviceWorkerParam: { scope: appDir() },
+        notifyButton: { enable: false }, allowLocalhostAsSecureOrigin: true })
+        .then(function () { return OneSignal.login(cfg.pushId); })
+        .then(function () { state.os = OneSignal; refreshPushState(); })
+        .catch(function () { state.pushState = 'error'; if (current().page === 'me') rerender(); });
+    });
+    if (!document.getElementById('os-sdk')) {
+      var sc = document.createElement('script'); sc.id = 'os-sdk'; sc.defer = true; sc.src = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';
+      sc.onerror = function () { state.pushState = 'error'; if (current().page === 'me') rerender(); };
+      document.head.appendChild(sc);
+    }
+  }
+  function refreshPushState() {
+    var os = state.os; if (!os) return;
+    var perm = (window.Notification && Notification.permission) || 'default';
+    state.pushState = perm === 'denied' ? 'blocked' : (os.User && os.User.PushSubscription && os.User.PushSubscription.optedIn && perm === 'granted') ? 'on' : 'off';
+    if (current().page === 'me') rerender();
+  }
+  function turnOnPush() {
+    if (state.pushState === 'needs-home') return install();
+    if (!state.os) return toast('Notifications are still loading. Try again in a moment.');
+    Promise.resolve(state.os.Notifications.requestPermission()).then(function () {
+      return state.os.User.PushSubscription.optIn ? state.os.User.PushSubscription.optIn() : null;
+    }).then(function () { setTimeout(function () { refreshPushState(); if (state.pushState === 'on') toast('Notifications are on'); }, 600); })
+      .catch(function () { refreshPushState(); });
+  }
+  function pushLogout() { try { if (state.os && state.os.logout) state.os.logout(); } catch (e) {} state.push = null; state.os = null; state.pushState = 'off'; }
+  function pushRowHtml() {
+    if (!can('push_orders') && !can('push_ready')) return '';
+    var what = can('push_orders') ? 'new orders and \u201ce-transfer sent\u201d' : 'orders that are ready for pickup';
+    var st = state.pushState, sub, btn = '';
+    if (!state.push) sub = can('admin') ? 'Not set up yet. Admin › Settings › Notifications.' : 'Not set up yet.';
+    else if (st === 'on') { sub = 'On. You\u2019ll get ' + what + '.'; btn = '<button class="btn small" data-act="push-test">Test</button>'; }
+    else if (st === 'needs-home') { sub = 'Add this app to your home screen first, then open it from there.'; btn = '<button class="btn small" data-act="install">How</button>'; }
+    else if (st === 'blocked') sub = 'Blocked. Allow notifications for this app in your phone’s settings.';
+    else if (st === 'unsupported') sub = 'This browser can’t show notifications. Use Safari (iPhone) or Chrome (Android).';
+    else if (st === 'loading') sub = 'Getting ready…';
+    else if (st === 'error') sub = 'Couldn’t load the notification service. Check your connection and reopen the app.';
+    else { sub = 'Off on this phone.'; btn = '<button class="btn small primary" data-act="push-on">Turn on</button>'; }
+    return '<div class="group-head">Notifications</div><div class="group"><div class="row"><span class="ic red">' + ICON.bell + '</span><span class="grow"><span class="title">' + (can('push_orders') ? 'Order notifications' : 'Pickup notifications') + '</span><span class="sub">' + esc(sub) + '</span></span>' + btn + '</div></div>';
+  }
+  function openPendingOrder() {
+    var no = state.pendingOrder; state.pendingOrder = null;
+    var o = orderByNo(no);
+    if (!o) { toast('Order #' + no + ' isn’t in your list.'); return; }
+    state.seg = (o.status === 'NEW' || o.status === 'SENT') && can('confirm') ? 'waiting' : o.status === 'READY' ? 'ready' : o.status === 'PICKED_UP' ? 'done' : (can('confirm') ? 'all' : 'ready');
+    state.search = '#' + no; state.openMore[no] = true; state.tab = 'orders'; state.stack = [];
+    render(); window.scrollTo(0, 0);
   }
 
   /* =================================================================== Stock */
@@ -552,6 +622,369 @@
     });
   }
 
+  /* =================================================================== Cash at the desk */
+  function newCashState() { return { email: '', phone: '', name: '', lookup: null, looking: false, orderNo: null, sorrentino: false, palliative: false, matchKey: '', items: {}, tuition: false, tuitionAmt: '', tuitionNote: '' }; }
+  function cashItemOn(i) { return !!state.cash.items[i.id] && i.wbStatus.status !== 'included'; }
+  function tuitionAmt() { var c = state.cash; if (!c.tuition) return 0; var a = String(c.tuitionAmt).trim(); return /^\d{1,6}(\.\d{1,2})?$/.test(a) ? Number(a) : 0; }
+  function cashSummary() {
+    var c = state.cash, L = c.lookup, a = [];
+    if (c.orderNo) { var o = L.openOrders.filter(function (x) { return x.orderNo === c.orderNo; })[0]; if (o) a.push(itemsText(o) + ' (order #' + o.orderNo + ')'); }
+    else cashBooks().forEach(function (b) { if (c[b.key] && b.status !== 'included' && !b.out) a.push(b.label); });
+    L.items.forEach(function (i) { if (cashItemOn(i)) a.push(i.name); });
+    if (c.tuition && tuitionAmt() > 0) a.push('Tuition' + (c.tuitionNote.trim() ? ' (' + c.tuitionNote.trim() + ')' : ''));
+    return a.join(' + ');
+  }
+  function cashBooks() {
+    var c = state.cash, L = c.lookup;
+    var m = L && L.matches.length ? L.matches[0] : null;
+    var prices = L ? L.prices : { sorrentino: 0, palliative: 0 };
+    var stock = {}; (L ? L.stock : []).forEach(function (i) { stock[i.key] = i; });
+    var out = function (keys) { return keys.some(function (k) { return stock[k] && stock[k].tracked && stock[k].onHand <= 0; }); };
+    return [
+      { key: 'sorrentino', label: 'Sorrentino textbook', price: prices.sorrentino, status: m ? m.books.sorrentino.status : 'owed', paidOn: m ? m.books.sorrentino.paidOn : '', out: out(['sorrentino']) },
+      { key: 'palliative', label: 'Palliative textbook + workbook', price: prices.palliative, status: m ? m.books.palliative.status : 'owed', paidOn: m ? m.books.palliative.paidOn : '', out: out(['pal_text', 'pal_work']) }
+    ];
+  }
+  function cashAmount() {
+    var c = state.cash, L = c.lookup; if (!L) return 0;
+    var t = 0;
+    if (c.orderNo) { var o = L.openOrders.filter(function (x) { return x.orderNo === c.orderNo; })[0]; t = o ? o.amount : 0; }
+    else t = cashBooks().reduce(function (t, b) { return t + (c[b.key] && b.status !== 'included' && !b.out ? b.price : 0); }, 0);
+    L.items.forEach(function (i) { if (cashItemOn(i)) t += i.price; });
+    t += tuitionAmt();
+    return Math.round(t * 100) / 100;
+  }
+  function cashBodyHtml() {
+    var c = state.cash, L = c.lookup, h = '';
+    if (!L) return '';
+    var m = L.matches.length ? L.matches[0] : null;
+    h += m ? '<div class="banner green">' + ICON.check + '<span class="grow"><b>' + esc(titleCase(m.name)) + '</b><br><span style="font-weight:400">' + esc(m.batch) + ' · ' + esc(m.agent) + (L.pending != null && L.pending > 0 ? ' · workbook balance ' + money(L.pending) : '') + '</span></span></div>'
+      : '<div class="banner amber">' + ICON.warn + '<span class="grow">Not in the accounting workbook. You can still take it; it’ll be flagged for the admin.</span></div>';
+    h += '<div class="group"><label class="cell"><span>Name</span><input id="cash-name" type="text" autocomplete="off" maxlength="80" value="' + esc(c.name) + '" placeholder="Student’s full name"></label></div>';
+    var waiting = L.openOrders.filter(function (o) { return !o.included; });
+    if (waiting.length) {
+      h += '<div class="group-head">Online order waiting</div><div class="group">' + waiting.map(function (o) {
+        return '<label class="row"><input type="radio" name="cash-order" value="' + o.orderNo + '"' + (c.orderNo === o.orderNo ? ' checked' : '') + '><span class="grow"><span class="title">Take cash for order #' + o.orderNo + '</span><span class="sub' + (o.status === 'SENT' ? ' warn' : '') + '">' + esc(itemsText(o)) + (o.status === 'SENT' ? '. They said they already e-transferred: check the inbox before taking cash.' : '') + '</span></span><span class="value">' + money(o.amount) + '</span></label>';
+      }).join('') + '<label class="row"><input type="radio" name="cash-order" value=""' + (!c.orderNo ? ' checked' : '') + '><span class="grow"><span class="title">Something else</span></span></label></div>';
+    }
+    if (!c.orderNo) {
+      h += '<div class="group-head">Books</div><div class="group">' + cashBooks().map(function (b) {
+        var blocked = b.status === 'included' || b.out, note = b.status === 'included' ? 'In their fees. Don’t take cash.' : b.out ? 'Out of stock. Don’t take cash.' : b.status === 'paid' ? 'Workbook shows paid' + (b.paidOn ? ' ' + b.paidOn : '') + '. Check before taking cash.' : '';
+        return '<label class="row' + (blocked ? ' blocked' : '') + '"><input type="checkbox" data-book="' + b.key + '"' + (c[b.key] && !blocked ? ' checked' : '') + (blocked ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(b.label) + '</span>' +
+          (note ? '<span class="sub' + (b.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(b.price) + '</span></label>';
+      }).join('') + '</div>';
+    }
+    // courses & exams from Settings > Cash items, grouped
+    var groups = [], byG = {};
+    L.items.forEach(function (i) { var g = i.group || 'Other'; if (!byG[g]) { byG[g] = []; groups.push(g); } byG[g].push(i); });
+    groups.forEach(function (g) {
+      h += '<div class="group-head">' + esc(g) + '</div><div class="group">' + byG[g].map(function (i) {
+        var st = i.wbStatus || { status: '' }, blocked = st.status === 'included';
+        var note = blocked ? 'In their fees. Don’t take cash.' : st.status === 'paid' ? 'Workbook shows ' + (i.wbLabel || i.name) + ' paid' + (st.amount != null ? ' ' + money(st.amount) : '') + (st.paidOn ? ' ' + st.paidOn : '') + '. Check before taking cash.' : st.status === 'owed' ? 'Owed per workbook' : '';
+        return '<label class="row' + (blocked ? ' blocked' : '') + '"><input type="checkbox" data-item="' + esc(i.id) + '"' + (c.items[i.id] && !blocked ? ' checked' : '') + (blocked ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(i.name) + '</span>' +
+          (note ? '<span class="sub' + (st.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(i.price) + '</span></label>';
+      }).join('') + '</div>';
+    });
+    h += '<div class="group-head">Tuition</div><div class="group"><label class="row"><input type="checkbox" data-tuition="1"' + (c.tuition ? ' checked' : '') + '><span class="grow"><span class="title">Tuition payment</span><span class="sub">You type the amount. A note is required.</span></span></label>' +
+      (c.tuition ? '<label class="cell"><span>Amount</span><input id="cash-tuition-amt" type="text" inputmode="decimal" autocomplete="off" value="' + esc(c.tuitionAmt) + '" placeholder="e.g. 500"></label>' +
+        '<label class="cell"><span>Note</span><input id="cash-tuition-note" type="text" autocomplete="off" maxlength="120" value="' + esc(c.tuitionNote) + '" placeholder="e.g. instalment 2 of 4"></label>' : '') + '</div>';
+    var amt = cashAmount();
+    h += '<div class="cash-total"><span>Cash to collect</span><b>' + money(amt) + '</b></div>';
+    h += '<div class="group-head">Student signs</div><div class="sig"><canvas id="sig-student" aria-label="Student signature"></canvas><div class="sig-foot"><span id="sig-student-name">' + esc(c.name || 'Student') + ' · paid ' + money(amt) + ' cash</span><button class="link" data-act="sig-clear" data-sig="student">Clear</button></div></div>';
+    h += '<div class="group-head">Staff signs</div><div class="sig"><canvas id="sig-staff" aria-label="Staff signature"></canvas><div class="sig-foot"><span>Received by ' + esc(state.user.name) + '</span><button class="link" data-act="sig-clear" data-sig="staff">Clear</button></div></div>';
+    h += '<p id="cash-error" class="error" hidden></p><button id="cash-go" class="btn primary block" data-act="cash-save"' + (amt > 0 ? '' : ' disabled') + '>' + cashGoText(amt) + '</button>';
+    h += '<p class="group-foot">This is your internal record that the student paid and the money was received. It isn’t the student’s receipt.</p>';
+    return h;
+  }
+  function cashGoText(amt) { return amt > 0 ? 'Cash ' + money(amt) + ' received' + (cashHandOver() ? ' · hand over' : '') : 'Choose what they’re paying for'; }
+  function cashHandOver() { var c = state.cash; return !!(c.orderNo || c.sorrentino || c.palliative); }
+  // typed tuition changes the total without a re-render (keeps the keyboard up); the student signs for a specific amount, so their signature clears
+  function cashUpdateTotal() {
+    var amt = cashAmount(), t = document.querySelector('.cash-total b'); if (t) t.textContent = money(amt);
+    var n = $('sig-student-name'); if (n) n.textContent = (state.cash.name || 'Student') + ' \u00b7 paid ' + money(amt) + ' cash';
+    var b = $('cash-go'); if (b) { b.disabled = !(amt > 0); b.textContent = cashGoText(amt); }
+    if (pads.student && pads.student.signed()) pads.student.clear();
+  }
+  var pads = {}, cashListeners = false;
+  function sigPad(canvas) {
+    var ctx, drawing = false, len = 0, last = null;
+    function setup() {
+      var r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(r.width * dpr)); canvas.height = Math.max(1, Math.round(r.height * dpr));
+      ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; len = 0;
+    }
+    function pt(e) { var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    canvas.addEventListener('pointerdown', function (e) { drawing = true; last = pt(e); err('cash-error', ''); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} e.preventDefault(); });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!drawing) return; var p = pt(e);
+      ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+      len += Math.hypot(p.x - last.x, p.y - last.y); last = p; e.preventDefault();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { canvas.addEventListener(ev, function () { drawing = false; }); });
+    setup();
+    return {
+      clear: setup, signed: function () { return len > 40; },
+      png: function () {
+        var sizes = [[480, 160], [360, 120]];
+        for (var i = 0; i < sizes.length; i++) {
+          var off = document.createElement('canvas'); off.width = sizes[i][0]; off.height = sizes[i][1];
+          var o = off.getContext('2d'); o.fillStyle = '#fff'; o.fillRect(0, 0, off.width, off.height); o.drawImage(canvas, 0, 0, off.width, off.height);
+          var url = off.toDataURL('image/png'); if (url.length < 44000) return url;
+        }
+        return '';
+      }
+    };
+  }
+  // opts.keepStudent=false: the student signed for a specific amount, so a change of books/order clears their signature
+  function cashRenderBody(opts) {
+    opts = opts || {};
+    var el = $('cash-body'); if (!el) return;
+    var keepS = opts.keepStudent !== false && pads.student && pads.student.signed() ? pads.student.png() : null;
+    var keepT = opts.keepStaff !== false && pads.staff && pads.staff.signed() ? pads.staff.png() : null;
+    el.innerHTML = cashBodyHtml();
+    pads = {};
+    if ($('sig-student')) { pads.student = sigPad($('sig-student')); pads.staff = sigPad($('sig-staff')); }
+    // re-draw signatures that were already made (e.g. after ticking a book)
+    [['student', keepS], ['staff', keepT]].forEach(function (p) { if (p[1] && pads[p[0]]) restoreSig(p[0], p[1]); });
+  }
+  function restoreSig(which, url) {
+    var cv = $('sig-' + which), img = new Image();
+    img.onload = function () { var r = cv.getBoundingClientRect(); cv.getContext('2d').drawImage(img, 0, 0, r.width, r.height); pads[which].restored = url; };
+    img.src = url;
+    var pad = pads[which], signed = pad.signed, png = pad.png;
+    pad.signed = function () { return !!pad.restored || signed(); };
+    pad.png = function () { return signed() ? png() : (pad.restored || ''); };
+    var clear = pad.clear; pad.clear = function () { pad.restored = null; clear(); };
+  }
+  PAGES.cashNew = {
+    title: 'Cash payment',
+    html: function () {
+      var c = state.cash;
+      return '<p class="lead">Find the student, tick what they’re paying for, both sign. Books are handed over right away.</p>' +
+        '<div class="group-head">Student</div><div class="group">' +
+        '<label class="cell"><span>Email</span><input id="cash-email" type="email" inputmode="email" autocapitalize="none" autocomplete="off" value="' + esc(c.email) + '" placeholder="The email they gave the college"></label>' +
+        '<label class="cell"><span>Phone</span><input id="cash-phone" type="tel" inputmode="tel" autocomplete="off" value="' + esc(c.phone) + '" placeholder="10 digits"></label></div>' +
+        '<p class="group-foot">Both are needed for the record. We look them up in the accounting workbook.</p>' +
+        '<p id="cash-find-error" class="error" hidden></p><button id="cash-find" class="btn block" data-act="cash-find">' + (c.lookup ? 'Look up again' : 'Find student') + '</button>' +
+        '<div id="cash-body" style="margin-top:18px"></div>';
+    },
+    after: function () {
+      cashRenderBody();
+      ['email', 'phone'].forEach(function (k) { $('cash-' + k).addEventListener('input', function (e) { state.cash[k] = e.target.value; }); });
+      if (cashListeners) return; cashListeners = true;
+      $('page').addEventListener('input', function (e) {
+        if (current().page !== 'cashNew' || !state.cash) return;
+        if (e.target.id === 'cash-name') { state.cash.name = e.target.value; var n = $('sig-student-name'); if (n) n.textContent = (state.cash.name || 'Student') + ' \u00b7 paid ' + money(cashAmount()) + ' cash'; }
+        else if (e.target.id === 'cash-tuition-amt') { state.cash.tuitionAmt = e.target.value; err('cash-error', ''); cashUpdateTotal(); }
+        else if (e.target.id === 'cash-tuition-note') { state.cash.tuitionNote = e.target.value; err('cash-error', ''); }
+      });
+      $('page').addEventListener('change', function (e) {
+        if (current().page !== 'cashNew' || !state.cash) return;
+        var t = e.target;
+        err('cash-error', '');
+        if (t.dataset && t.dataset.book) { state.cash[t.dataset.book] = t.checked; cashRenderBody({ keepStudent: false }); }
+        else if (t.dataset && t.dataset.item) { state.cash.items[t.dataset.item] = t.checked; cashRenderBody({ keepStudent: false }); }
+        else if (t.dataset && t.dataset.tuition) { state.cash.tuition = t.checked; cashRenderBody({ keepStudent: false }); if (t.checked) { var a = $('cash-tuition-amt'); if (a) a.focus(); } }
+        else if (t.name === 'cash-order') { state.cash.orderNo = t.value ? Number(t.value) : null; cashRenderBody({ keepStudent: false }); }
+      });
+    }
+  };
+  function cashFind(btn) {
+    var c = state.cash; c.email = $('cash-email').value.trim(); c.phone = $('cash-phone').value.trim();
+    if (!c.email && !c.phone) return err('cash-find-error', 'Enter their email or phone number.');
+    err('cash-find-error', ''); btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>';
+    sapi('cashLookup', [c.email, c.phone]).then(function (L) {
+      c.lookup = L; c.orderNo = null; c.sorrentino = false; c.palliative = false; c.items = {}; c.tuition = false; c.tuitionAmt = ''; c.tuitionNote = '';
+      var m = L.matches[0]; c.matchKey = m ? m.key : ''; c.name = m ? titleCase(m.name) : '';
+      btn.disabled = false; btn.textContent = 'Look up again'; pads = {}; cashRenderBody({ keepStudent: false, keepStaff: false });
+      setTimeout(function () { var b = $('cash-body'); if (b) b.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+    }).catch(function (e) { btn.disabled = false; btn.textContent = 'Find student'; if (!e.signedOut) err('cash-find-error', e.message); });
+  }
+  function cashSave() {
+    var c = state.cash, amt = cashAmount();
+    c.name = ($('cash-name') ? $('cash-name').value : c.name).trim(); c.email = $('cash-email').value.trim(); c.phone = $('cash-phone').value.trim();
+    if (!c.name) return err('cash-error', 'Enter the student’s name.');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.email)) return err('cash-error', 'Enter the student’s email above.');
+    if (c.phone.replace(/\D/g, '').length < 10) return err('cash-error', 'Enter the student’s phone number above (10 digits).');
+    if (!(amt > 0)) return err('cash-error', 'Choose what they’re paying for.');
+    if (c.tuition) {
+      if (!(tuitionAmt() > 0)) return err('cash-error', 'Enter the tuition amount, like 500 or 500.50.');
+      if (c.tuitionNote.trim().length < 3) return err('cash-error', 'Add a note for the tuition payment, like “instalment 2 of 4”.');
+    }
+    if (!pads.student || !pads.student.signed()) return err('cash-error', 'The student needs to sign.');
+    if (!pads.staff || !pads.staff.signed()) return err('cash-error', 'You need to sign as the person receiving the cash.');
+    err('cash-error', '');
+    var summary = cashSummary(), hand = cashHandOver();
+    dialog({ title: 'Take ' + money(amt) + ' cash?', html: 'Count the cash from <b>' + esc(c.name) + '</b> first.<br>For: ' + esc(summary) + '.' + (hand ? '<br>Then hand over the books.' : ''), ok: 'Cash received' }).then(function (r) {
+      if (!r) return;
+      var b = $('cash-go'); b.disabled = true; b.innerHTML = '<span class="spinner sm"></span>'; state.busy = true;
+      var form = { name: c.name, email: c.email, phone: c.phone, matchKey: c.matchKey, orderNo: c.orderNo || '', sorrentino: !c.orderNo && c.sorrentino, palliative: !c.orderNo && c.palliative,
+        items: c.lookup.items.filter(cashItemOn).map(function (i) { return i.id; }), tuition: c.tuition ? { amount: String(c.tuitionAmt).trim(), note: c.tuitionNote.trim() } : null,
+        studentSig: pads.student.png(), staffSig: pads.staff.png() };
+      sapi('cashRecord', [form]).then(function (x) {
+        buzz(30); state.cash = newCashState(); pads = {}; state.loadedAt.me = 0;
+        state.stack = []; state.tab = 'cash'; state.cashRep = null; state.cashMine = null; render(); loadOrders(true); refreshStockQuiet();
+        dialog({ title: 'Saved · ' + x.cashId, html: '<b>' + money(x.amount) + '</b> for ' + esc(x.summary) + '.' + (x.handOver ? '<br>Hand over: <b>' + esc(x.handOver) + '</b>.' : '') + '<br>' + (can('cash_report') ? 'It\u2019s in the Cash tab, and emailed to you.' : 'The admin has been notified.'), ok: 'Done', noCancel: true });
+      }).catch(function (e) { if (!e.signedOut) { err('cash-error', e.message); var bb = $('cash-go'); if (bb) { bb.disabled = false; bb.textContent = cashGoText(amt); } } })
+        .then(function () { state.busy = false; });
+    });
+  }
+
+  /* ---------- admin: cash report ---------- */
+  function dayStart(d) { var x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+  function cashRangeDates(r) {
+    var now = new Date(), t0 = dayStart(now), from = null, to = null;
+    if (r.key === 'today') from = t0;
+    else if (r.key === 'week') from = new Date(t0.getTime() - 6 * 86400000);
+    else if (r.key === 'month') from = new Date(t0.getFullYear(), t0.getMonth(), 1);
+    else if (r.key === 'custom') { from = r.from ? dayStart(r.from + 'T00:00') : null; to = r.to ? new Date(dayStart(r.to + 'T00:00').getTime() + 86400000) : null; }
+    return { from: from ? from.toISOString() : '', to: to ? to.toISOString() : '' };
+  }
+  function loadCashReport() {
+    var d = cashRangeDates(state.cashRange);
+    state.cashRep = null; if ($('cash-rep')) $('cash-rep').innerHTML = loadingHtml();
+    return sapi('cashReport', [d.from, d.to]).then(function (r) { state.cashRep = r; state.cashRepAt = Date.now(); if ($('cash-rep')) $('cash-rep').innerHTML = cashRepHtml(); })
+      .catch(function (e) { if (!e.signedOut) toast(e.message); });
+  }
+  function cashRepHtml() {
+    var r = state.cashRep; if (!r) return loadingHtml();
+    var h = '<div class="cash-sum"><div class="s-num">' + money(r.total) + '</div><div class="s-label">' + r.count + (r.count === 1 ? ' payment' : ' payments') + (r.voidCount ? ' · ' + r.voidCount + ' voided' : '') + '</div></div>';
+    if (r.byStaff.length) h += '<div class="group-head">By staff</div><div class="group">' + r.byStaff.map(function (b) {
+      return '<div class="row"><span class="avatar">' + esc(initials(b.name)) + '</span><span class="grow"><span class="title">' + esc(b.name) + '</span><span class="sub">' + b.count + (b.count === 1 ? ' payment' : ' payments') + '</span></span><span class="value strong">' + money(b.total) + '</span></div>';
+    }).join('') + '</div>';
+    if (r.byItem.length) h += '<div class="group-head">By item</div><div class="group">' + r.byItem.map(function (b) {
+      return '<div class="row"><span class="grow"><span class="title">' + esc(b.name) + '</span><span class="sub">' + b.count + '×</span></span><span class="value strong">' + money(b.total) + '</span></div>';
+    }).join('') + '</div>';
+    if (!r.records.length) return h + '<div class="empty">' + ICON.check + '<strong>No cash in this period</strong>Cash payments taken at the desk show up here.</div>';
+    var out = '', lastDay = '';
+    r.records.forEach(function (x) {
+      var day = dayLabel(x.at);
+      if (day !== lastDay) { if (lastDay) out += '</div>'; out += '<div class="day">' + esc(day) + '</div><div class="group">'; lastDay = day; }
+      out += '<button class="row' + (x.status === 'void' ? ' void' : '') + '" data-act="go" data-page="cashDetail" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">' + esc(x.cashId) + ' · ' + esc(titleCase(x.workbookName || x.name)) + (x.status === 'void' ? ' <span class="chip grey">VOID</span>' : '') + '</span>' +
+        '<span class="sub">' + esc(x.summary) + ' · by ' + esc(firstName(x.receivedByName)) + ' · ' + esc(timeOf(x.at)) + '</span></span><span class="value strong">' + money(x.amount) + '</span><span class="chev">' + ICON.chev + '</span></button>';
+    });
+    return h + out + '</div>';
+  }
+  function cashMineHtml() {
+    var m = state.cashMine; if (!m) return loadingHtml();
+    var h = '<div class="cash-sum"><div class="s-num">' + money(m.total) + '</div><div class="s-label">You took today · ' + m.count + (m.count === 1 ? ' payment' : ' payments') + '. Count your drawer against this.</div></div>';
+    if (!m.records || !m.records.length) return h;
+    return h + '<div class="group-head">Today</div><div class="group">' + m.records.map(function (x) {
+      return '<div class="row"><span class="grow"><span class="title">' + esc(x.cashId) + ' · ' + esc(titleCase(x.workbookName || x.name)) + '</span><span class="sub">' + esc(x.summary) + ' · ' + esc(timeOf(x.at)) + '</span></span><span class="value strong">' + money(x.amount) + '</span></div>';
+    }).join('') + '</div>';
+  }
+  function loadCashMine() {
+    return sapi('cashMine', [dayStart(new Date()).toISOString()]).then(function (r) { state.cashMine = r; state.cashMineAt = Date.now(); if (current().page === 'cash' && $('cash-rep')) $('cash-rep').innerHTML = cashMineHtml(); if (current().page === 'me') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+  }
+  PAGES.cash = {
+    title: 'Cash', root: true,
+    right: function () { return navBtn('refresh-cash', ICON.refresh, 'Refresh'); },
+    html: function () {
+      var h = '<div class="large-row"><h1 class="large">Cash</h1></div>' +
+        '<button class="btn primary block" data-act="cash-new" style="margin-bottom:16px">' + ICON.plus + 'New cash payment</button>';
+      if (!can('cash_report')) return h + '<div id="cash-rep">' + cashMineHtml() + '</div><p class="group-foot">Books, courses, exams and tuition paid in cash at the desk. The admin sees every record.</p>';
+      var R = state.cashRange, segs = [['today', 'Today'], ['week', '7 days'], ['month', 'Month'], ['all', 'All'], ['custom', 'Custom']];
+      return h + '<div class="seg">' + segs.map(function (s) { return '<button data-cashrange="' + s[0] + '" class="' + (R.key === s[0] ? 'on' : '') + '">' + s[1] + '</button>'; }).join('') + '</div>' +
+        (R.key === 'custom' ? '<div class="group"><label class="cell"><span>From</span><input id="cr-from" type="date" value="' + esc(R.from || '') + '"></label><label class="cell"><span>To</span><input id="cr-to" type="date" value="' + esc(R.to || '') + '"></label></div><button class="btn block" data-act="cash-custom" style="margin-top:12px">Show</button>' : '') +
+        '<div id="cash-rep">' + cashRepHtml() + '</div>';
+    },
+    after: function () {
+      if (!can('cash_report')) { if (!state.cashMine || Date.now() - (state.cashMineAt || 0) > 60000) loadCashMine(); return; }
+      if (state.cashRange.key === 'custom' && !state.cashRange.from) return;
+      if (!state.cashRep || Date.now() - (state.cashRepAt || 0) > 60000) loadCashReport();
+    }
+  };
+  PAGES.cashDetail = {
+    title: function (c) { return c.params.cash || 'Cash record'; },
+    html: function (c) {
+      var x = state.cashDetail && state.cashDetail.cashId === c.params.cash ? state.cashDetail : null;
+      if (!x) return loadingHtml();
+      var kv = [['Amount', '<b>' + money(x.amount) + '</b> cash'], ['For', esc(x.summary)]];
+      if (x.sorrentino || x.palliative) kv.push(['Handed over', esc(itemsText(x))]);
+      if (x.note) kv.push(['Note', esc(x.note)]);
+      kv.push(['Student', esc(x.name)]);
+      if (x.workbookName && x.workbookName.toLowerCase() !== x.name.toLowerCase()) kv.push(['In workbook as', esc(titleCase(x.workbookName))]);
+      kv.push(['Phone', esc(x.phone)], ['Email', esc(x.email)]);
+      if (x.studentNumber) kv.push(['Student ID', esc(x.studentNumber)]);
+      if (x.batch) kv.push(['Batch', esc(x.batch)]);
+      kv.push(['Agent', esc(agentLabel(x.agent))], ['Received by', esc(x.receivedByName) + ' (@' + esc(x.receivedBy) + ')'], ['When', esc(when(x.at))]);
+      if (x.orderNo) kv.push(['Order', '#' + x.orderNo]);
+      var h = (x.status === 'void' ? '<div class="banner red">' + ICON.warn + '<span class="grow">Voided ' + esc(when(x.voidAt)) + ' by @' + esc(x.voidBy) + ': ' + esc(x.voidReason) + '</span></div>' : '') +
+        (x.flags.length ? '<div class="c-tags" style="margin:0 0 12px">' + x.flags.map(function (f) { return '<span class="tag">' + esc(f) + '</span>'; }).join('') + '</div>' : '') +
+        '<div class="group"><dl class="kv" style="padding:6px 16px 10px">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl></div>' +
+        '<div class="group-head">Student signature</div><div class="sig-view"><img alt="Student signature" src="' + esc(x.studentSig) + '"><span>' + esc(x.name) + '</span></div>' +
+        '<div class="group-head">Received by</div><div class="sig-view"><img alt="Staff signature" src="' + esc(x.staffSig) + '"><span>' + esc(x.receivedByName) + '</span></div>';
+      if (x.status !== 'void' && can('cash_void')) h += '<div class="group" style="margin-top:26px"><button class="row danger" data-act="cash-void" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">Void this record</span><span class="sub">If it was logged by mistake. Any books go back into stock; the record stays, marked VOID.</span></span></button></div>';
+      return h;
+    },
+    after: function (c) {
+      if (c.params.loaded) return; c.params.loaded = true;
+      sapi('cashGet', [c.params.cash]).then(function (x) { state.cashDetail = x; if (current().page === 'cashDetail') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+    }
+  };
+  function agentLabel(a) { a = String(a || '').trim(); return !a || /^dir/i.test(a) ? 'Direct' : a; }
+  function cashVoidAct(id) {
+    dialog({ title: 'Void ' + id + '?', html: 'Only if it was logged by mistake. Any books go back into stock and the record is kept, marked VOID.', ok: 'Void', destructive: true,
+      inputs: [{ key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }], validate: function (v) { return v.reason ? '' : 'Say why it’s being voided.'; } })
+      .then(function (r) {
+        if (!r) return;
+        sapi('cashVoid', [id, r.reason]).then(function (x) { state.cashDetail = x; rerender(); toast(id + ' voided'); refreshStockQuiet(); state.cashRep = null; })
+          .catch(function (e) { if (!e.signedOut) toast(e.message); });
+      });
+  }
+
+  /* ---------- admin: cash items (what can be paid for in cash, and the price) ---------- */
+  PAGES.cashItems = {
+    title: 'Cash items',
+    html: function () {
+      var d = state.cashItems; if (!d) return loadingHtml();
+      var h = '<p class="lead">What the desk can take cash for, and the price. Switch an item off to hide it; tuition is always there and typed in.</p>';
+      var groups = [], byG = {};
+      d.items.forEach(function (i, idx) { var g = i.group || 'Other'; if (!byG[g]) { byG[g] = []; groups.push(g); } byG[g].push(idx); });
+      groups.forEach(function (g) {
+        h += '<div class="group-head">' + esc(g) + '</div><div class="group">' + byG[g].map(function (idx) {
+          var i = d.items[idx];
+          return '<div class="row ci' + (i.on ? '' : ' off') + '"><label class="switch"><input type="checkbox" data-ci-on="' + idx + '"' + (i.on ? ' checked' : '') + '><span></span></label>' +
+            '<input class="ci-name" type="text" maxlength="40" data-ci-name="' + idx + '" value="' + esc(i.name) + '" placeholder="Name">' +
+            '<span class="ci-price">$<input type="text" inputmode="decimal" maxlength="8" data-ci-price="' + idx + '" value="' + esc(i.price) + '" placeholder="0"></span></div>';
+        }).join('') + '</div>';
+      });
+      h += '<button class="btn block" data-act="ci-add" style="margin-top:12px">' + ICON.plus + 'Add an item</button>';
+      h += '<p id="ci-error" class="error" hidden></p><button id="ci-save" class="btn primary block" data-act="ci-save" style="margin-top:12px">Save</button>';
+      h += '<p class="group-foot">Items linked to the accounting workbook (CPR, GPA, NACC) warn the desk when the workbook already shows them paid or included. New items you add here aren’t linked.</p>';
+      return h;
+    },
+    after: function (c) {
+      if (!c.params.loaded) { c.params.loaded = true; state.cashItems = null; sapi('cashItemsGet').then(function (d) { state.cashItems = d; if (current().page === 'cashItems') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); }
+      if (c.params.bound) return; c.params.bound = true;
+      $('page').addEventListener('input', function (e) {
+        if (current().page !== 'cashItems' || !state.cashItems) return;
+        var t = e.target, it = state.cashItems.items;
+        if (t.dataset.ciName != null) it[t.dataset.ciName].name = t.value;
+        else if (t.dataset.ciPrice != null) it[t.dataset.ciPrice].price = t.value;
+        err('ci-error', '');
+      });
+      $('page').addEventListener('change', function (e) {
+        if (current().page !== 'cashItems' || !state.cashItems) return;
+        var t = e.target;
+        if (t.dataset.ciOn != null) { state.cashItems.items[t.dataset.ciOn].on = t.checked; t.closest('.row').classList.toggle('off', !t.checked); }
+      });
+    }
+  };
+  function cashItemsSave(btn) {
+    var items = state.cashItems.items.filter(function (i) { return i.name.trim() || String(i.price).trim(); });
+    for (var k = 0; k < items.length; k++) {
+      if (!items[k].name.trim()) return err('ci-error', 'Every item needs a name.');
+      if (!/^\d{1,5}(\.\d{1,2})?$/.test(String(items[k].price).trim())) return err('ci-error', items[k].name + ': enter a price like 45 or 45.50.');
+    }
+    if (!items.length) return err('ci-error', 'Keep at least one item (switch it off instead of deleting).');
+    err('ci-error', ''); btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>';
+    sapi('cashItemsSave', [items]).then(function (d) { state.cashItems = d; toast('Cash items saved'); back(); })
+      .catch(function (e) { if (!e.signedOut) err('ci-error', e.message); })
+      .then(function () { var b = $('ci-save'); if (b) { b.disabled = false; b.textContent = 'Save'; } });
+  }
+
   /* =================================================================== Admin */
   PAGES.admin = {
     title: 'Admin', root: true,
@@ -566,7 +999,9 @@
       '<button class="stat' + (s && s.waiting ? ' hot' : '') + '" data-act="goto-orders" data-seg="waiting"><div class="s-num">' + num(s && s.waiting) + '</div><div class="s-label">Waiting on you</div></button>' +
       '<button class="stat" data-act="goto-orders" data-seg="ready"><div class="s-num">' + num(s && s.ready) + '</div><div class="s-label">Ready for pickup</div></button>' +
       '<div class="stat"><div class="s-num">' + num(s && s.pickedToday) + '</div><div class="s-label">Picked up today</div></div>' +
-      '<div class="stat"><div class="s-num">' + (s ? money(s.moneyWeek) : '–') + '</div><div class="s-label">Confirmed this week' + (s ? ' · ' + s.confirmedWeek + ' orders' : '') + '</div></div>' +
+      '<div class="stat"><div class="s-num">' + (s ? money(s.moneyWeek) : '\u2013') + '</div><div class="s-label">Confirmed this week' + (s ? ' \u00b7 ' + s.confirmedWeek + ' orders' : '') + '</div></div>' +
+      '<div class="stat"><div class="s-num">' + num(s && s.ordersToday) + '</div><div class="s-label">Orders today</div></div>' +
+      '<button class="stat" data-act="cash-today"><div class="s-num">' + (state.cashToday ? money(state.cashToday.total) : '\u2013') + '</div><div class="s-label">Cash today' + (state.cashToday ? ' \u00b7 ' + state.cashToday.count : '') + '</div></button>' +
       '</div>';
     if (state.stock && state.stock.low.length) h += '<div style="margin-top:14px">' + lowBanner() + '</div>';
     h += '<div class="group-head">People</div><div class="group">' +
@@ -577,6 +1012,7 @@
       '<button class="row" data-act="tab" data-tab="stock"><span class="ic amber">' + ICON.stock + '</span><span class="grow"><span class="title">Stock</span></span><span class="value">' + (state.stock ? state.stock.items.filter(function (i) { return i.tracked; }).map(function (i) { return i.onHand; }).join(' · ') : '') + '</span><span class="chev">' + ICON.chev + '</span></button></div>';
     h += '<div class="group-head">Setup</div><div class="group">' +
       rowLink('settings', ICON.gear, 'grey', 'Settings', 'Prices, e-transfer email') +
+      rowLink('cashItems', ICON.cash, 'green', 'Cash items', 'CPR, GPA, NACC prices') +
       '<div class="row"><span class="ic">' + ICON.sheet + '</span><span class="grow"><span class="title">Accounting workbook</span><span class="sub">' +
       (l ? (l.ok ? esc(l.sourceName || '') + ' · ' + l.students + ' students' : 'Problem: ' + esc(l.error)) : 'Checking…') + '</span></span>' +
       '<button class="btn small" data-act="reread">Re-read</button></div></div>';
@@ -589,8 +1025,9 @@
   }
   function loadAdmin() {
     var b = document.querySelector('[data-act="refresh-admin"]'); if (b) b.classList.add('spin');
-    return Promise.all([sapi('adminStats'), sapi('adminStaffList')]).then(function (r) {
-      state.stats = r[0]; state.stock = r[0].stock; state.lookup = r[0].lookup; state.staff = r[1];
+    var today = cashRangeDates({ key: 'today' });
+    return Promise.all([sapi('adminStats'), sapi('adminStaffList'), sapi('cashReport', [today.from, today.to])]).then(function (r) {
+      state.stats = r[0]; state.stock = r[0].stock; state.lookup = r[0].lookup; state.staff = r[1]; state.cashToday = r[2];
       if ($('admin-body')) $('admin-body').innerHTML = adminBody(); renderTabbar();
     }).catch(function (e) { if (!e.signedOut) toast(e.message); })
       .then(function () { var x = document.querySelector('[data-act="refresh-admin"]'); if (x) x.classList.remove('spin'); });
@@ -750,7 +1187,7 @@
     STAFF_CREATED: ['Added a staff member', 'amber', 'changes'], STAFF_UPDATED: ['Changed a staff account', 'amber', 'changes'], STAFF_REMOVED: ['Removed a staff member', 'red', 'changes'],
     ORDER: ['New order', '', 'orders'], SENT: ['Student says e-transfer sent', '', 'orders'], CONFIRM: ['Confirmed payment', '', 'orders'], PICKED_UP: ['Handed over', 'blue', 'orders'],
     CANCEL: ['Cancelled an order', 'red', 'orders'], NOTE: ['Wrote a note', 'grey', 'orders'], SETTINGS: ['Changed settings', 'amber', 'changes'], STOCK: ['Updated stock', 'amber', 'changes'],
-    STOCK_ERROR: ['Stock problem', 'red', 'changes'], LOOKUP_REFRESH: ['Re-read the workbook', 'grey', 'changes']
+    STOCK_ERROR: ['Stock problem', 'red', 'changes'], CASH: ['Took cash', '', 'orders'], CASH_VOID: ['Voided cash', 'red', 'orders'], EMAIL_FAIL: ['Email failed', 'red', 'changes'], LOOKUP_REFRESH: ['Re-read the workbook', 'grey', 'changes']
   };
   function nameOf(username) { var u = state.staff ? state.staff.staff.filter(function (x) { return x.username === username; })[0] : null; return u ? u.name : username; }
   PAGES.activity = {
@@ -806,12 +1243,27 @@
         });
         h += '</div>' + (foot ? '<p class="group-foot">' + esc(foot) + '</p>' : '');
       });
-      return h + '<p id="set-error" class="error" hidden></p><button id="set-save" class="btn primary block" data-act="settings-save">Save settings</button>';
+      h += '<p id="set-error" class="error" hidden></p><button id="set-save" class="btn primary block" data-act="settings-save">Save settings</button>';
+      h += '<div class="group-head" style="margin-top:34px">Notifications</div><div class="group">' +
+        '<label class="cell"><span>App ID</span><input id="push-appid" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="From OneSignal" value="' + esc(s.onesignal_app_id || '') + '"></label>' +
+        '<label class="cell"><span>API key</span><input id="push-key" type="password" autocomplete="off" placeholder="' + (s.onesignal_has_key ? 'Saved \u2713 (leave blank to keep)' : 'App API key from OneSignal') + '"></label></div>' +
+        '<p class="group-foot">Free at onesignal.com: New App \u203a Web \u203a Typical site, site URL <code>' + esc(location.origin) + '</code>. Copy the App ID, and an App API key from Settings \u203a Keys &amp; IDs. Then each person turns them on under Me \u203a Notifications. Clear the App ID and save to turn notifications off.</p>' +
+        '<p id="push-error" class="error" hidden></p><button id="push-save" class="btn block" data-act="push-save">Save notifications</button>';
+      return h;
     },
     after: function (c) {
-      if (!c.params.loaded) { c.params.loaded = true; sapi('getSettings').then(function (s) { state.settings = s; if (current().page === 'settings') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); }
+      if (!c.params.loaded && !state.settings) { c.params.loaded = true; sapi('getSettings').then(function (s) { state.settings = s; if (current().page === 'settings') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); }
     }
   };
+  function savePushSettings() {
+    var appId = $('push-appid').value.trim(), key = $('push-key').value.trim();
+    if (appId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId)) return err('push-error', 'That App ID doesn\u2019t look right. It looks like 1a2b3c4d-1234-5678-9abc-def012345678.');
+    err('push-error', ''); var b = $('push-save'); b.disabled = true; b.textContent = 'Saving\u2026';
+    sapi('notifySetup', [{ appId: appId, apiKey: key, appUrl: location.origin + appDir() }]).then(function (st) {
+      state.settings.onesignal_app_id = st.appId; state.settings.onesignal_has_key = st.hasKey; $('push-key').value = '';
+      toast(st.appId ? 'Saved. Now turn them on under Me \u203a Notifications.' : 'Notifications turned off'); rerender(); loadOrders(true);
+    }).catch(function (e) { if (!e.signedOut) err('push-error', e.message); }).then(function () { var x = $('push-save'); if (x) { x.disabled = false; x.textContent = 'Save notifications'; } });
+  }
   function saveSettings() {
     var s = {}; SETTING_FIELDS.forEach(function (f) { s[f[0]] = $('set-' + f[0]).value.trim(); });
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.etransfer_email)) return err('set-error', 'Enter a valid e-transfer email.');
@@ -831,6 +1283,8 @@
         '<button class="row" data-act="change-pin"><span class="ic">' + ICON.lock + '</span><span class="grow"><span class="title">Change PIN</span></span><span class="chev">' + ICON.chev + '</span></button>' +
         '<button class="row" data-act="go" data-page="password"><span class="ic grey">' + ICON.key + '</span><span class="grow"><span class="title">Change password</span></span><span class="chev">' + ICON.chev + '</span></button>' +
         '<button class="row" data-act="lock"><span class="ic blue">' + ICON.lock + '</span><span class="grow"><span class="title">Lock now</span><span class="sub">The app also locks after 5 minutes in the background.</span></span></button></div>';
+      h += pushRowHtml();
+      if (can('cash_take')) h += '<div class="group-head">Today</div><div class="group"><div class="row"><span class="ic green">' + ICON.cash + '</span><span class="grow"><span class="title">Cash you took today</span><span class="sub">' + (state.cashMine ? state.cashMine.count + (state.cashMine.count === 1 ? ' payment' : ' payments') + '. Count your drawer against this.' : 'Loading\u2026') + '</span></span><span class="value strong">' + (state.cashMine ? money(state.cashMine.total) : '') + '</span></div></div>';
       if (!standalone()) h += '<div class="group-head">App</div><div class="group"><button class="row" data-act="install"><span class="ic violet">' + ICON.home + '</span><span class="grow"><span class="title">Add to home screen</span><span class="sub">Opens full screen like an app.</span></span><span class="chev">' + ICON.chev + '</span></button></div>';
       h += '<div class="group-head">Signed in on</div>';
       if (!me) h += loadingHtml();
@@ -841,7 +1295,11 @@
       h += '<div class="group" style="margin-top:26px"><button class="row danger" data-act="signout"><span class="grow center"><span class="title">Sign out</span></span></button></div>';
       return h + '<p class="foot">PRIME Staff ' + VERSION + '</p>';
     },
-    after: function () { if (stale('me')) sapi('staffMe').then(function (r) { state.me = r; if (current().page === 'me') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); }
+    after: function () {
+      if (!stale('me')) return;
+      sapi('staffMe').then(function (r) { state.me = r; if (current().page === 'me') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+      if (can('cash_take')) loadCashMine();
+    }
   };
   PAGES.password = {
     title: 'Change password',
@@ -909,6 +1367,8 @@
     $('v-main').addEventListener('click', function (e) {
       var s = e.target.closest('[data-seg]');
       if (s && s.closest('.seg')) { state.seg = s.dataset.seg; set(LS.seg, state.seg); updateOrders(); return; }
+      var cr = e.target.closest('[data-cashrange]');
+      if (cr) { state.cashRange = cr.dataset.cashrange === 'custom' ? { key: 'custom', from: state.cashRange.from || '', to: state.cashRange.to || '' } : { key: cr.dataset.cashrange }; rerender(); if (state.cashRange.key !== 'custom') loadCashReport(); return; }
       var af = e.target.closest('[data-actfilter]');
       if (af) { state.actFilter = af.dataset.actfilter; rerender(); return; }
       var b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
@@ -922,7 +1382,7 @@
       }
       switch (act) {
         case 'back': return back();
-        case 'go': return go(b.dataset.page, b.dataset.username ? { username: b.dataset.username } : {});
+        case 'go': return go(b.dataset.page, b.dataset.username ? { username: b.dataset.username } : b.dataset.cash ? { cash: b.dataset.cash } : {});
         case 'tab': return setTab(b.dataset.tab);
         case 'goto-orders': state.seg = b.dataset.seg; set(LS.seg, state.seg); return setTab('orders');
         case 'refresh': return current().page === 'stock' ? refreshStockQuiet().then(function () { toast('Stock updated'); }) : loadOrders(false);
@@ -937,6 +1397,21 @@
         case 'password-save': return savePassword();
         case 'change-pin': return showPin('change');
         case 'lock': return lock();
+        case 'push-on': return turnOnPush();
+        case 'push-test':
+          b.disabled = true;
+          return sapi('notifyTest').then(function () { toast('Test sent. It should pop up in a few seconds.'); }).catch(function (e4) { if (!e4.signedOut) toast(e4.message); }).then(function () { b.disabled = false; });
+        case 'push-save': return savePushSettings();
+        case 'cash-new': state.cash = newCashState(); pads = {}; return go('cashNew');
+        case 'cash-find': return cashFind(b);
+        case 'cash-save': return cashSave();
+        case 'sig-clear': if (pads[b.dataset.sig]) pads[b.dataset.sig].clear(); return;
+        case 'cash-today': state.cashRange = { key: 'today' }; state.cashRep = null; return setTab('cash');
+        case 'refresh-cash': return can('cash_report') ? loadCashReport() : loadCashMine();
+        case 'ci-add': state.cashItems.items.push({ id: '', name: '', group: '', price: '', wb: '', on: true }); rerender(); setTimeout(function () { var els = document.querySelectorAll('[data-ci-name]'); if (els.length) els[els.length - 1].focus(); }, 0); return;
+        case 'ci-save': return cashItemsSave(b);
+        case 'cash-custom': state.cashRange = { key: 'custom', from: $('cr-from').value, to: $('cr-to').value }; return loadCashReport();
+        case 'cash-void': return cashVoidAct(b.dataset.cash);
         case 'install': return install();
         case 'revoke':
           return sapi('staffRevokeSession', [b.dataset.id]).then(function (r) { state.me = r; state.loadedAt.me = Date.now(); rerender(); toast('That phone is signed out'); }).catch(function (e3) { if (!e3.signedOut) toast(e3.message); });
@@ -952,7 +1427,7 @@
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden') { state.hiddenAt = Date.now(); return; }
       if (state.unlocked && state.hiddenAt && Date.now() - state.hiddenAt > LOCK_AFTER_MS) return lock();
-      if (state.unlocked) loadOrders(true);
+      if (state.unlocked) { loadOrders(true); refreshPushState(); }
     });
     window.addEventListener('online', function () { show('offline', false); if (state.unlocked) loadOrders(true); });
     window.addEventListener('offline', function () { if (state.unlocked) show('offline', true); });
@@ -968,6 +1443,8 @@
   function boot() {
     initSetup(); initBootstrap(); initLogin(); initPin(); initMain();
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+    var qo = new URLSearchParams(location.search).get('order');
+    if (qo && /^\d{1,7}$/.test(qo)) { state.pendingOrder = Number(qo); history.replaceState(null, '', location.pathname); }
     // The server link comes from config.js (published with the app). A link typed on the setup screen is only used when config.js has none.
     var cfgUrl = window.PRIME_CONFIG && validUrl(window.PRIME_CONFIG.api) ? window.PRIME_CONFIG.api : null;
     if (cfgUrl && get(LS.url) && get(LS.url) !== cfgUrl) { set(LS.url, null); set(LS.token, null); set(LS.user, null); }
