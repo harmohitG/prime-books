@@ -55,7 +55,9 @@
   .b-cancel { background:var(--grey-bg); color:var(--faint); }
   .code { font-family:var(--mono); font-size:40px; letter-spacing:8px; font-weight:700; text-align:center; padding:22px 16px 22px 24px; background:var(--accent-soft); color:var(--accent-ink); border-radius:14px; margin:12px 0; }
   .copybox { font-family:var(--mono); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:15px; word-break:break-all; display:flex; justify-content:space-between; align-items:center; gap:8px; margin:8px 0; }
-  .copybox button { flex:none; padding:8px 12px; font-size:14px; }
+  .copybox button { flex:none; padding:8px 12px; font-size:14px; transition: background .15s, color .15s; }
+  .copybox button.copied, .small.copied { background:#0f7f4c !important; color:#fff !important; border-color:#0f7f4c !important; }
+  .copybox.copied { border-color:#0f7f4c; background:#e6f4ed; }
   .steps { padding-left:20px; margin:8px 0; }
   .steps li { margin:8px 0; }
   .error { color:var(--red); font-size:14px; margin:12px 4px 0; font-weight:500; }
@@ -195,7 +197,12 @@
     return '<span class="badge ' + cls + '">' + esc(txt) + '</span>';
   }
   function copyText(text, btn) {
-    var done = function () { if (btn) { var t = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = t; }, 1500); } };
+    var done = function () {
+      if (!btn) return;
+      var t = btn.textContent, box = btn.closest ? btn.closest('.copybox') : null;
+      btn.textContent = '\u2713 Copied'; btn.classList.add('copied'); if (box) box.classList.add('copied');
+      setTimeout(function () { btn.textContent = t; btn.classList.remove('copied'); if (box) box.classList.remove('copied'); }, 1800);
+    };
     var fallback = function () {
       var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'absolute'; ta.style.left = '-9999px';
       document.body.appendChild(ta); ta.select(); var ok = false;
@@ -206,6 +213,7 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
     else fallback();
   }
+  function etrMessage(o) { return 'Order ' + o.orderNo + ' \u00b7 ' + (o.name || '') + (o.phone ? ' \u00b7 ' + o.phone : ''); }
   function stopPoll() { if (state.poll) { clearInterval(state.poll); state.poll = null; } }
   function orderLink() { return (BASE_URL || location.href.split('?')[0].split('#')[0]) + '?o=' + encodeURIComponent(state.token || ''); }
   function setUrlParams(params) {
@@ -295,8 +303,8 @@
       h += '<h3>Send your e-transfer</h3><ol class="steps">' +
         '<li>Send <strong>' + money(o.amount) + '</strong> by Interac e-transfer to:' +
         '<div class="copybox"><span>' + esc(cfg.etransferEmail) + '</span><button class="small" onclick="copyText(\'' + esc(cfg.etransferEmail) + '\', this)">Copy</button></div></li>' +
-        '<li>In the transfer message, write your order number:' +
-        '<div class="copybox"><span>Order ' + o.orderNo + '</span><button class="small" onclick="copyText(\'Order ' + o.orderNo + '\', this)">Copy</button></div></li>' +
+        '<li>In the transfer <strong>message</strong>, paste this (your name and phone help us match it):' +
+        '<div class="copybox"><span id="etr-msg">' + esc(etrMessage(o)) + '</span><button class="small" onclick="copyText(document.getElementById(\'etr-msg\').textContent, this)">Copy</button></div></li>' +
         '<li>Come back here and tap the button below.</li></ol>';
       if (o.status === 'NEW') h += '<button class="primary" onclick="markSent()">I\'ve sent the e-transfer</button>';
       else h += '<p class="success">Thanks. Sent ' + esc(when(o.sentAt)) + '. Your pickup code will appear here once the payment is confirmed (usually the same day).</p>';
