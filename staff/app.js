@@ -95,6 +95,10 @@
     dots: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="18" cy="12" r="1.9"/></svg>',
     lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10.5" width="14" height="10" rx="2.2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>',
     phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+    house: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 11 12 4l8.5 7"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5.5h4V20"/></svg>',
+    menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+    book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg>',
+    expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>',
     box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4-8.5 4-8.5-4z"/><path d="M3.5 7.5v9l8.5 4 8.5-4v-9"/><path d="M12 11.5v9"/></svg>',
     cash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
@@ -273,7 +277,7 @@
 
   /* =================================================================== main shell */
   function tabsFor() {
-    var t = [{ key: 'orders', label: 'Orders', icon: ICON.orders }];
+    var t = [{ key: 'home', label: 'Home', icon: ICON.house }, { key: 'orders', label: 'Book orders', icon: ICON.orders }];
     if (can('cash_take')) t.push({ key: 'cash', label: 'Cash', icon: ICON.cash });
     if (can('stock_view')) t.push({ key: 'stock', label: 'Stock', icon: ICON.stock });
     if (can('admin')) t.push({ key: 'admin', label: 'Admin', icon: ICON.admin });
@@ -283,22 +287,25 @@
   function enterMain(list) {
     state.unlocked = true; screen('main');
     if (list) applyList(list);   // came back with the PIN unlock: no second round-trip
-    var t = get(LS.tab); state.tab = tabsFor().some(function (x) { return x.key === t; }) ? t : 'orders';
-    state.stack = []; state.seg = get(LS.seg);
+    state.tab = 'home';   // every open starts on Home; sections are in the side menu
+    state.stack = []; state.seg = get(LS.seg); closeDrawer();
     render(); if (!list) loadOrders(false); else { if (state.pendingOrder) openPendingOrder(); } startPolling();
   }
   function resumeMain() { screen('main'); render(); startPolling(); }
   function lock() {
     if (!state.unlocked) return;
     if (state.token) api('staffLock', [state.token]).catch(function () {});
-    state.unlocked = false; stopPolling(); closeDialog();
+    state.unlocked = false; stopPolling(); closeDialog(); closeDrawer(); var fs = $('sigfs'); if (fs) { fs.remove(); document.body.classList.remove('sigfs-on'); }
     state.orders = []; state.ordersAt = null; state.staff = null; state.activity = null; state.me = null; state.settings = null; state.revealPin = {}; state.loadedAt = {};
     showPin('unlock');
   }
   function current() { return state.stack.length ? state.stack[state.stack.length - 1] : { page: state.tab }; }
   function go(page, params) { state.stack.push({ page: page, params: params || {} }); render(); window.scrollTo(0, 0); }
   function back() { state.stack.pop(); render(); window.scrollTo(0, 0); }
-  function setTab(t) { if (t === state.tab && !state.stack.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; } state.tab = t; set(LS.tab, t); state.stack = []; render(); window.scrollTo(0, 0); }
+  function setTab(t) { closeDrawer(); if (t === state.tab && !state.stack.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; } state.tab = t; set(LS.tab, t); state.stack = []; render(); window.scrollTo(0, 0); }
+  /* the side menu (all sections), opened with the menu button at the top left */
+  function openDrawer() { renderTabbar(); var d = $('drawer'); if (!d) return; d.hidden = false; requestAnimationFrame(function () { d.classList.add('open'); }); }
+  function closeDrawer() { var d = $('drawer'); if (!d || d.hidden) return; d.classList.remove('open'); setTimeout(function () { if (!d.classList.contains('open')) d.hidden = true; }, 220); }
 
   var PAGES = {};
   function render() {
@@ -308,7 +315,7 @@
     var prev = state.stack.length > 1 ? state.stack[state.stack.length - 2] : { page: state.tab };
     $('nav-left').innerHTML = state.stack.length
       ? '<button class="nav-back" data-act="back">' + ICON.back + '<span>' + esc(pageTitle(prev)) + '</span></button>'
-      : '<span class="brand"><i></i>PRIME</span>';
+      : '<button class="nav-btn nav-menu" data-act="drawer" aria-label="Menu">' + ICON.menu + '</button><span class="brand"><i></i>PRIME</span>';
     $('nav-title').textContent = pageTitle(cur);
     $('nav-right').innerHTML = P.right ? P.right(cur) : '';
     var page = $('page'); page.className = 'page' + (P.root ? '' : ' sub');
@@ -322,9 +329,10 @@
     var c = counts(), lowN = state.stock ? state.stock.low.length : 0;
     $('tabbar').innerHTML = tabsFor().map(function (t) {
       var n = t.key === 'orders' ? (can('confirm') ? c.waiting : c.ready) : t.key === 'stock' ? lowN : 0;
-      return '<button data-tab="' + t.key + '" class="' + (state.tab === t.key ? 'active' : '') + '" aria-label="' + t.label + '">' + t.icon + '<span>' + t.label + '</span>' +
+      return '<button data-tab="' + t.key + '" class="' + (state.tab === t.key && !state.stack.length ? 'active' : '') + '" aria-label="' + t.label + '">' + t.icon + '<span class="lbl">' + t.label + '</span>' +
         (n ? '<span class="badge">' + (n > 99 ? '99+' : n) + '</span>' : '') + '</button>';
-    }).join('');
+    }).join('') + '<div class="drawer-sep"></div><button data-act="lock" class="drawer-lock">' + ICON.lock + '<span class="lbl">Lock</span></button>';
+    var who = $('drawer-who'); if (who && state.user) who.innerHTML = '<b>' + esc(state.user.name) + '</b><span>' + esc(state.user.roleLabel || '') + '</span>';
     try { if (navigator.setAppBadge) { if (can('confirm') && c.waiting) navigator.setAppBadge(c.waiting); else navigator.clearAppBadge(); } } catch (e) {}
   }
   function onScroll() { $('nav').classList.toggle('scrolled', window.scrollY > 30); }
@@ -334,6 +342,39 @@
     if (!state.stock || !state.stock.low.length) return '';
     return '<button class="banner red" data-act="tab" data-tab="stock">' + ICON.warn + '<span class="grow">Low stock: ' + esc(state.stock.low.join(' · ')) + '</span>' + (state.tab === 'stock' ? '' : '<span class="chev">' + ICON.chev + '</span>') + '</button>';
   }
+
+  /* =================================================================== Home */
+  function greeting() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
+  function firstNameOf(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
+  PAGES.home = {
+    title: 'Home', root: true,
+    right: function () { return navBtn('refresh', ICON.refresh, 'Refresh'); },
+    html: function () {
+      var c = counts(), lowN = state.stock ? state.stock.low.length : 0;
+      var h = '<div class="large-row"><h1 class="large">' + esc(greeting()) + (state.user ? ', ' + esc(firstNameOf(state.user.name)) : '') + '</h1></div>' +
+        '<p class="home-date">' + esc(new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })) + '</p>' + lowBanner();
+      // today at a glance
+      var stats = [];
+      if (can('confirm')) stats.push(['orders', c.waiting, c.waiting === 1 ? 'order to confirm' : 'orders to confirm', c.waiting ? 'hot' : '']);
+      stats.push(['orders', c.ready, 'ready for pickup', '']);
+      if (can('cash_take')) stats.push(['cash', state.cashMine ? money(state.cashMine.total) : '\u2013', 'cash you took today', '']);
+      if (can('stock_view') && lowN) stats.push(['stock', lowN, lowN === 1 ? 'book low on stock' : 'books low on stock', 'warn']);
+      h += '<div class="home-stats">' + stats.map(function (x) { return '<button class="home-stat ' + x[3] + '" data-act="tab" data-tab="' + x[0] + '"><b>' + x[1] + '</b><span>' + x[2] + '</span></button>'; }).join('') + '</div>';
+      if (can('cash_take')) h += '<button class="btn primary block" data-act="cash-new" style="margin:14px 0 4px">' + ICON.plus + 'New cash payment</button>';
+      // the sections, like apps on a phone
+      var apps = [['orders', 'Book orders', ICON.book, 'blue', can('confirm') ? c.waiting : c.ready]];
+      if (can('cash_take')) { apps.push(['cash', 'Cash', ICON.cash, 'green', 0]); apps.push(['@cashbook', 'Cash book', ICON.sheet, 'teal', 0]); }
+      if (can('stock_view')) apps.push(['stock', 'Stock', ICON.stock, 'amber', lowN]);
+      if (can('admin')) apps.push(['admin', 'Admin', ICON.admin, 'violet', 0]);
+      apps.push(['me', 'Me', ICON.me, 'grey', 0]);
+      h += '<div class="group-head">Apps</div><div class="apps">' + apps.map(function (a) {
+        var attrs = a[0] === '@cashbook' ? 'data-act="cashbook"' : 'data-act="tab" data-tab="' + a[0] + '"';
+        return '<button class="app" ' + attrs + ' aria-label="' + esc(a[1]) + '"><span class="app-ic ' + a[3] + '">' + a[2] + (a[4] ? '<i class="badge">' + (a[4] > 99 ? '99+' : a[4]) + '</i>' : '') + '</span><span class="app-name">' + esc(a[1]) + '</span></button>';
+      }).join('') + '</div>';
+      return h;
+    },
+    after: function () { if (can('cash_take') && (!state.cashMine || Date.now() - (state.cashMineAt || 0) > 60000)) loadCashMine(); }
+  };
 
   /* =================================================================== Orders */
   function counts() {
@@ -468,7 +509,7 @@
       var roleChanged = applyList(r);
       if (state.pendingOrder) openPendingOrder();
       if (roleChanged) { state.stack = []; if (!tabsFor().some(function (t) { return t.key === state.tab; })) state.tab = 'orders'; rerender(); }
-      else { updateOrders(); renderTabbar(); if (current().page === 'stock' && !state.busy) updateStock(); }
+      else { updateOrders(); renderTabbar(); if (current().page === 'stock' && !state.busy) updateStock(); if (current().page === 'home' && !state.busy && $('dlg').hidden) rerender(); }
     }).catch(function (e) { if (!silent && !e.signedOut) toast(e.message); })
       .then(function () { var b = document.querySelector('[data-act="refresh"]'); if (b) b.classList.remove('spin'); });
   }
@@ -718,8 +759,8 @@
     }
     var amt = cashAmount();
     h += '<div class="cash-total"><span>Cash to collect</span><b>' + money(amt) + '</b></div>';
-    h += '<div class="group-head">Student signs</div><div class="sig"><canvas id="sig-student" aria-label="Student signature"></canvas><div class="sig-foot"><span id="sig-student-name">' + esc(c.name || 'Student') + ' · paid ' + money(amt) + ' cash</span><button class="link" data-act="sig-clear" data-sig="student">Clear</button></div></div>';
-    h += '<div class="group-head">Staff signs</div><div class="sig"><canvas id="sig-staff" aria-label="Staff signature"></canvas><div class="sig-foot"><span>Received by ' + esc(state.user.name) + '</span><button class="link" data-act="sig-clear" data-sig="staff">Clear</button></div></div>';
+    h += '<div class="group-head">Student signs</div>' + sigBox('student', '<span id="sig-student-name">' + esc(c.name || 'Student') + ' · paid ' + money(amt) + ' cash</span>');
+    h += '<div class="group-head">Staff signs</div>' + sigBox('staff', '<span>Received by ' + esc(state.user.name) + '</span>');
     h += '<p id="cash-error" class="error" hidden></p><button id="cash-go" class="btn primary block" data-act="cash-save"' + (amt > 0 ? '' : ' disabled') + '>' + cashGoText(amt) + '</button>';
     h += '<p class="group-foot">This is your internal record that the student paid and the money was received. It isn’t the student’s receipt.</p>';
     return h;
@@ -733,14 +774,63 @@
     var b = $('cash-go'); if (b) { b.disabled = !(amt > 0); b.textContent = cashGoText(amt); }
     if (pads.student && pads.student.signed()) pads.student.clear();
   }
+  function sigBox(which, label) {
+    return '<div class="sig" id="sigbox-' + which + '"><div class="sig-area"><canvas id="sig-' + which + '" aria-label="' + (which === 'student' ? 'Student' : 'Staff') + ' signature"></canvas>' +
+      '<span class="sig-hint">Sign here</span><span class="sig-x">\u00d7</span><span class="sig-ok">' + ICON.check + '</span>' +
+      '<button class="sig-big" data-act="sig-big" data-sig="' + which + '" aria-label="Sign full screen">' + ICON.expand + '<span>Full screen</span></button></div>' +
+      '<div class="sig-foot">' + label + '<button class="link" data-act="sig-clear" data-sig="' + which + '">Clear</button></div></div>';
+  }
+  function sigMark(which) { var b = $('sigbox-' + which), p = pads[which]; if (b && p) b.classList.toggle('signed', !!p.signed()); }
+  /** Full-screen signing: a big white pad over everything; on Done the ink is trimmed and fitted into the small box. */
+  function openSigFull(which) {
+    var pad = pads[which]; if (!pad) return;
+    var amt = cashAmount(), who = which === 'student' ? (state.cash.name || 'Student') + ' \u00b7 paid ' + money(amt) + ' cash' : 'Received by ' + state.user.name;
+    var ov = document.createElement('div'); ov.className = 'sigfs'; ov.id = 'sigfs';
+    ov.innerHTML = '<div class="sigfs-top"><button class="link" data-fs="cancel">Cancel</button><b>' + (which === 'student' ? 'Student signature' : 'Your signature') + '</b><button class="link strong" data-fs="done">Done</button></div>' +
+      '<div class="sigfs-area"><canvas id="sigfs-canvas" aria-label="Full screen signature pad"></canvas><span class="sig-hint">Sign here</span><span class="sigfs-line"></span></div>' +
+      '<div class="sigfs-foot"><span>' + esc(who) + '</span><button class="link" data-fs="clear">Clear</button></div><p class="sigfs-tip">Tip: turn the phone sideways for more room.</p>';
+    document.body.appendChild(ov); document.body.classList.add('sigfs-on');
+    var big = null;
+    var start = function () { big = sigPad($('sigfs-canvas'), function () { ov.classList.toggle('signed', big.signed()); }); };
+    requestAnimationFrame(start);
+    var onResize = function () { if (big && !big.signed()) start(); };
+    window.addEventListener('resize', onResize);
+    var close = function () { window.removeEventListener('resize', onResize); document.body.classList.remove('sigfs-on'); ov.remove(); };
+    ov.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-fs]'); if (!b) return;
+      if (b.dataset.fs === 'cancel') return close();
+      if (b.dataset.fs === 'clear') { big.clear(); ov.classList.remove('signed'); return; }
+      if (b.dataset.fs === 'done') {
+        if (!big.signed()) { close(); return; }
+        var url = fitInk($('sigfs-canvas'), 480, 160);
+        close();
+        pad.clear(); restoreSig(which, url); sigMark(which); err('cash-error', '');
+      }
+    });
+  }
+  /** Crops a canvas to its ink and centres it on a white w x h image (PNG data URL, small enough for a cell). */
+  function fitInk(cv, w, h) {
+    var x = cv.getContext('2d'), d = x.getImageData(0, 0, cv.width, cv.height).data, minX = cv.width, minY = cv.height, maxX = -1, maxY = -1;
+    for (var y = 0; y < cv.height; y += 2) for (var i = 0; i < cv.width; i += 2) { var a = d[(y * cv.width + i) * 4 + 3]; if (a > 20) { if (i < minX) minX = i; if (i > maxX) maxX = i; if (y < minY) minY = y; if (y > maxY) maxY = y; } }
+    if (maxX < 0) { minX = 0; minY = 0; maxX = cv.width - 1; maxY = cv.height - 1; }
+    var pad = Math.round(Math.min(cv.width, cv.height) * 0.04); minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad); maxX = Math.min(cv.width - 1, maxX + pad); maxY = Math.min(cv.height - 1, maxY + pad);
+    var sw = maxX - minX + 1, sh = maxY - minY + 1, sizes = [[w, h], [Math.round(w * 0.75), Math.round(h * 0.75)]];
+    for (var k = 0; k < sizes.length; k++) {
+      var W = sizes[k][0], H = sizes[k][1], s = Math.min((W * 0.94) / sw, (H * 0.88) / sh), off = document.createElement('canvas'); off.width = W; off.height = H;
+      var o = off.getContext('2d'); o.fillStyle = '#fff'; o.fillRect(0, 0, W, H); o.imageSmoothingQuality = 'high';
+      o.drawImage(cv, minX, minY, sw, sh, (W - sw * s) / 2, (H - sh * s) / 2, sw * s, sh * s);
+      var url = off.toDataURL('image/png'); if (url.length < 44000) return url;
+    }
+    return '';
+  }
   var pads = {}, cashListeners = false;
-  function sigPad(canvas) {
+  function sigPad(canvas, onInk) {
     var ctx, drawing = false, len = 0, last = null;
     function setup() {
       var r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
       canvas.width = Math.max(1, Math.round(r.width * dpr)); canvas.height = Math.max(1, Math.round(r.height * dpr));
       ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; len = 0;
+      ctx.lineWidth = canvas.id === 'sigfs-canvas' ? 3.6 : 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; len = 0;
     }
     function pt(e) { var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
     canvas.addEventListener('pointerdown', function (e) { drawing = true; last = pt(e); err('cash-error', ''); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} e.preventDefault(); });
@@ -749,10 +839,10 @@
       ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
       len += Math.hypot(p.x - last.x, p.y - last.y); last = p; e.preventDefault();
     });
-    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { canvas.addEventListener(ev, function () { drawing = false; }); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { canvas.addEventListener(ev, function () { if (drawing && onInk) onInk(); drawing = false; }); });
     setup();
     return {
-      clear: setup, signed: function () { return len > 40; },
+      clear: function () { setup(); if (onInk) onInk(); }, signed: function () { return len > 40; },
       png: function () {
         var sizes = [[480, 160], [360, 120]];
         for (var i = 0; i < sizes.length; i++) {
@@ -772,18 +862,18 @@
     var keepT = opts.keepStaff !== false && pads.staff && pads.staff.signed() ? pads.staff.png() : null;
     el.innerHTML = cashBodyHtml();
     pads = {};
-    if ($('sig-student')) { pads.student = sigPad($('sig-student')); pads.staff = sigPad($('sig-staff')); }
+    if ($('sig-student')) { pads.student = sigPad($('sig-student'), function () { sigMark('student'); }); pads.staff = sigPad($('sig-staff'), function () { sigMark('staff'); }); }
     // re-draw signatures that were already made (e.g. after ticking a book)
     [['student', keepS], ['staff', keepT]].forEach(function (p) { if (p[1] && pads[p[0]]) restoreSig(p[0], p[1]); });
   }
   function restoreSig(which, url) {
     var cv = $('sig-' + which), img = new Image();
-    img.onload = function () { var r = cv.getBoundingClientRect(); cv.getContext('2d').drawImage(img, 0, 0, r.width, r.height); pads[which].restored = url; };
+    img.onload = function () { var r = cv.getBoundingClientRect(); cv.getContext('2d').drawImage(img, 0, 0, r.width, r.height); pads[which].restored = url; sigMark(which); };
     img.src = url;
     var pad = pads[which], signed = pad.signed, png = pad.png;
     pad.signed = function () { return !!pad.restored || signed(); };
     pad.png = function () { return signed() ? png() : (pad.restored || ''); };
-    var clear = pad.clear; pad.clear = function () { pad.restored = null; clear(); };
+    var clear = pad.clear; pad.clear = function () { pad.restored = null; clear(); sigMark(which); };
   }
   PAGES.cashNew = {
     title: 'Cash payment',
@@ -910,7 +1000,7 @@
     }).join('') + '</div>';
   }
   function loadCashMine() {
-    return sapi('cashMine', [dayStart(new Date()).toISOString()]).then(function (r) { state.cashMine = r; state.cashMineAt = Date.now(); if (current().page === 'cash' && $('cash-rep')) $('cash-rep').innerHTML = cashMineHtml(); if (current().page === 'me') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+    return sapi('cashMine', [dayStart(new Date()).toISOString()]).then(function (r) { state.cashMine = r; state.cashMineAt = Date.now(); if (current().page === 'cash' && $('cash-rep')) $('cash-rep').innerHTML = cashMineHtml(); if (current().page === 'me' || current().page === 'home') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
   }
   PAGES.cash = {
     title: 'Cash', root: true,
@@ -1578,7 +1668,10 @@
         case 'cash-find': return cashFind(b, false);
         case 'cash-external': return cashFind(b, true);
         case 'cash-save': return cashSave();
-        case 'sig-clear': if (pads[b.dataset.sig]) pads[b.dataset.sig].clear(); return;
+        case 'sig-clear': if (pads[b.dataset.sig]) { pads[b.dataset.sig].clear(); sigMark(b.dataset.sig); } return;
+        case 'sig-big': return openSigFull(b.dataset.sig);
+        case 'drawer': return openDrawer();
+        case 'drawer-close': return closeDrawer();
         case 'cash-today': state.cashRange = { key: 'today' }; state.cashRep = null; return setTab('cash');
         case 'refresh-cash': return can('cash_report') ? loadCashReport() : loadCashMine();
         case 'refresh-cashbook': return (state.cbView || 'day') === 'day' ? loadCashBook(state.cashBook ? state.cashBook.date : '') : loadCashBookSummary();

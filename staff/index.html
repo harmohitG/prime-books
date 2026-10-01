@@ -87,7 +87,14 @@
     <div id="practice-bar" class="practice-bar" hidden><b>Practice mode</b> · nothing made now counts: no stock, pings or emails. Wipe it under Admin.</div>
     <div id="offline" class="offline" hidden>You're offline. Changes will work again when you're back online.</div>
     <main id="page" class="page"></main>
-    <nav class="tabbar" id="tabbar" aria-label="Sections"></nav>
+    <div id="drawer" class="drawer" hidden>
+      <div class="drawer-scrim" data-act="drawer-close"></div>
+      <aside class="drawer-panel" aria-label="Menu">
+        <div class="drawer-head"><span class="brand"><i></i>PRIME</span><button class="nav-btn" data-act="drawer-close" aria-label="Close menu">&times;</button></div>
+        <div class="drawer-who" id="drawer-who"></div>
+        <nav class="tabbar" id="tabbar" aria-label="Sections"></nav>
+      </aside>
+    </div>
   </section>
 
   <!-- ============ overlays ============ -->
