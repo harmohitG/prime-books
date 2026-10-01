@@ -398,3 +398,15 @@ body.sigfs-on { overflow: hidden; }
 .rc-make .btn { box-shadow: 0 6px 20px rgba(0,0,0,.18); }
 .rc-make .group-foot { margin: 6px 4px 0; }
 select#rc-prog { font: inherit; font-size: 15px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #d9dee1); background: var(--card, #fff); color: inherit; max-width: 100%; }
+
+.rc-box { margin: 10px 0; }
+.rc-box > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow); cursor: pointer; }
+.rc-box > summary::-webkit-details-marker { display: none; }
+.rc-box > summary .chev { color: var(--faint); display: flex; transition: transform .15s; }
+.rc-box > summary .chev svg { width: 14px; height: 14px; }
+.rc-box[open] > summary { border-radius: var(--r) var(--r) 0 0; border-bottom: 1px solid var(--sep); }
+.rc-box[open] > summary .chev { transform: rotate(90deg); }
+.rc-box > .group { margin-top: 0; border-radius: 0 0 var(--r) var(--r); }
+.rc-bname { display: block; font-weight: 600; font-size: 16px; }
+.rc-bsub { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.rc-box .link { font-size: 14px; padding: 4px 6px; white-space: nowrap; }

@@ -17,7 +17,7 @@
     timer: null, hiddenAt: 0, busy: false, deferredInstall: null, pin: { mode: 'unlock', digits: '', first: '', busy: false }, loadedAt: {},
     push: null, os: null, pushState: 'off', pendingOrder: null,
     cash: null, cashRange: { key: 'today' }, cashRep: null, cashDetail: null, cashToday: null, cashMine: null, cashItems: null, cashBook: null, practice: false,
-    rcTodo: null, rcSel: {}, rcStudent: null, rcPick: {}, rcProgram: '', rcView: null, rcQ: ''
+    rcTodo: null, rcSel: {}, rcOpen: {}, rcStudent: null, rcPick: {}, rcProgram: '', rcView: null, rcQ: ''
   };
   /** true (and marks it) if `key` hasn't been loaded in the last `ms`: stops pages that re-render after loading from loading again. */
   function stale(key, ms) { var t = state.loadedAt[key] || 0; if (Date.now() - t < (ms || 15000)) return false; state.loadedAt[key] = Date.now(); return true; }
@@ -956,8 +956,9 @@
         state.stack = []; state.tab = 'cash'; state.cashRep = null; state.cashMine = null; render(); loadOrders(true); refreshStockQuiet();
         var savedHtml = '<b>' + money(x.amount) + '</b> for ' + esc(x.summary) + '.' + (x.handOver ? '<br>Hand over: <b>' + esc(x.handOver) + '</b>.' : '') + '<br>' + (can('cash_report') ? 'It\u2019s in the Cash tab, and emailed to you.' : 'The admin has been notified.');
         var rcs = x.receipts || [];
-        if (rcs.length) offerReceipts(rcs, { title: 'Saved · ' + x.cashId, html: savedHtml + '<br>Receipt <b>' + esc(rcs.map(function (r) { return r.no; }).join(', ')) + '</b> is ready for the student.', ok: 'Print receipt', cancel: 'Done', after: 'The receipt is saved: print it later from the Cash tab.' });
-        else dialog({ title: 'Saved · ' + x.cashId, html: savedHtml + (x.receiptNote ? '<br><span class="muted">' + esc(x.receiptNote) + '</span>' : ''), ok: 'Done', noCancel: true });
+        savedHtml += rcs.length ? '<br>Receipt <b>' + esc(rcs.map(function (r) { return r.no; }).join(', ')) + '</b>, with both signatures, is ready to print.'
+          : (x.receiptNote ? '<br><span class="muted">' + esc(x.receiptNote) + '</span>' : '') + '<br>The record with both signatures is ready to print.';
+        cashPdfAct(x.cashId, null, { title: 'Saved · ' + x.cashId, html: savedHtml, ok: 'Print', cancel: 'Done' });
       }).catch(function (e) { if (!e.signedOut) { err('cash-error', e.message); var bb = $('cash-go'); if (bb) { bb.disabled = false; bb.textContent = cashGoText(amt); } } })
         .then(function () { state.busy = false; });
     });
@@ -1004,7 +1005,7 @@
     if (!m.records || !m.records.length) return h;
     return h + '<div class="group-head">Today</div><div class="group">' + m.records.map(function (x) {
       return '<div class="row"><span class="grow"><span class="title">' + esc(x.cashId) + ' · ' + esc(titleCase(x.workbookName || x.name)) + (x.test ? ' <span class="chip test">TEST</span>' : '') + '</span><span class="sub">' + esc(x.summary) + ' · ' + esc(timeOf(x.at)) + '</span>' +
-        ((x.receipts || []).length ? '<span class="rc-btns">' + x.receipts.map(rcButton).join('') + '</span>' : '') + '</span><span class="value strong">' + money(x.amount) + '</span></div>';
+        '<span class="rc-btns">' + (x.receipts || []).map(rcButton).join('') + '<button class="btn small" data-act="cash-pdf" data-cash="' + esc(x.cashId) + '">' + ICON.sheet + 'Cash record</button></span>' + '</span><span class="value strong">' + money(x.amount) + '</span></div>';
     }).join('') + '</div>';
   }
   function loadCashMine() {
@@ -1047,7 +1048,8 @@
       var h = (x.status === 'void' ? '<div class="banner red">' + ICON.warn + '<span class="grow">Voided ' + esc(when(x.voidAt)) + ' by @' + esc(x.voidBy) + ': ' + esc(x.voidReason) + '</span></div>' : '') +
         (x.flags.length ? '<div class="c-tags" style="margin:0 0 12px">' + x.flags.map(function (f) { return '<span class="tag">' + esc(f) + '</span>'; }).join('') + '</div>' : '') +
         '<div class="group"><dl class="kv" style="padding:6px 16px 10px">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl></div>' +
-        ((x.receipts || []).length ? '<div class="group-head">Student receipt</div><div class="rc-btns" style="margin:0 0 6px">' + x.receipts.map(function (r) { return rcButton(r) + (r.status === 'void' ? ' <span class="chip grey">VOID</span>' : ''); }).join('') + '</div>' : '') +
+        '<div class="rc-btns" style="margin:14px 0 6px"><button class="btn small" data-act="cash-pdf" data-cash="' + esc(x.cashId) + '">' + ICON.sheet + 'Cash record PDF (signatures)</button>' +
+        (x.receipts || []).map(function (r) { return rcButton(r) + (r.status === 'void' ? ' <span class="chip grey">VOID</span>' : ''); }).join('') + '</div>' +
         '<div class="group-head">Student signature</div><div class="sig-view"><img alt="Student signature" src="' + esc(x.studentSig) + '"><span>' + esc(x.name) + '</span></div>' +
         '<div class="group-head">Received by</div><div class="sig-view"><img alt="Staff signature" src="' + esc(x.staffSig) + '"><span>' + esc(x.receivedByName) + '</span></div>';
       var acts = '';
@@ -1108,6 +1110,43 @@
     return sapi('receiptGet', [no, sid || '']).then(function (r) { return offerReceipts([r]); })
       .catch(function (e) { if (!e.signedOut) toast(e.message); }).then(function () { if (btn) { btn.disabled = false; btn.innerHTML = label; } });
   }
+  /** The cash record PDF (both signatures), for printing from the phone. */
+  function sigImage(dataUrl) {
+    if (!dataUrl) return Promise.resolve(null);
+    if (typeof DecompressionStream !== 'undefined' && typeof CompressionStream !== 'undefined')
+      return window.PrimeReceipt.pngImage(dataUrl).catch(function () { return sigJpeg(dataUrl); });
+    return sigJpeg(dataUrl);
+  }
+  function sigJpeg(dataUrl) {   // older phones: draw on white, save as JPEG
+    return new Promise(function (resolve) {
+      var im = new Image();
+      im.onload = function () {
+        var c = document.createElement('canvas'); c.width = im.naturalWidth || 480; c.height = im.naturalHeight || 160;
+        var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0);
+        var b64 = c.toDataURL('image/jpeg', 0.9).split(',')[1], s = atob(b64), u = new Uint8Array(s.length);
+        for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+        resolve({ kind: 'jpeg', bytes: u });
+      };
+      im.onerror = function () { resolve(null); };
+      im.src = dataUrl;
+    });
+  }
+  function cashPdfAct(cashId, btn, o) {
+    var label = btn ? btn.innerHTML : ''; if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>'; }
+    var c;
+    return sapi('cashGet', [cashId]).then(function (x) { c = x; return Promise.all([receiptLogo(), sigImage(x.studentSig), sigImage(x.staffSig)]); })
+      .then(function (r) {
+        var p = { blob: new Blob([window.PrimeReceipt.cashPdf(c, r[0], { student: r[1], staff: r[2] })], { type: 'application/pdf' }), name: window.PrimeReceipt.cashFileName(c), count: 1 };
+        return dialog(o || { title: 'Cash record ' + c.cashId, html: '<b>' + esc(titleCase(c.workbookName || c.name)) + '</b> · ' + money(c.amount) + ' cash<br>The receipt with the record number and both signatures.', ok: 'Print / share', cancel: 'Close' })
+          .then(function (ok) { if (ok) sharePdf(p); });
+      })
+      .catch(function (e) {
+        if (e.signedOut) return;
+        if (o) return dialog({ title: o.title, html: o.html + '<br>(The PDF couldn’t be made: ' + esc(e.message || String(e)) + '. Print it from the Cash tab.)', ok: 'Done', noCancel: true });
+        toast(e.message || String(e));
+      })
+      .then(function () { if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = label; } });
+  }
   function rcButton(r) { return '<button class="btn small" data-act="rc-open" data-no="' + esc(r.no) + '" data-sid="' + esc(r.studentId || '') + '">' + ICON.receipt + 'Receipt ' + esc(r.no) + '</button>'; }
   function rcDate(ymd) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || '')); return m ? new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : String(ymd || ''); }
   var RC_STATUS = { done: ['green', 'Receipted'], todo: ['amber', 'To receipt'], check: ['red', 'Check'], changed: ['red', 'Differs'] };
@@ -1127,14 +1166,17 @@
     var by = {}, order = [];
     list.forEach(function (s) { var k = s.batch || 'No batch'; if (!by[k]) { by[k] = []; order.push(k); } by[k].push(s); });
     return head + order.map(function (k) {
-      var sel = by[k].filter(rcSelectable), n = by[k].reduce(function (a, s) { return a + (s.todo || 0); }, 0);
-      return '<div class="group-head rc-batch"><span class="grow">' + esc(k) + ' · ' + n + (n === 1 ? ' payment' : ' payments') + '</span>' + (sel.length ? '<button class="link" data-act="rc-selall" data-batch="' + esc(k) + '">Select all</button>' : '') + '</div><div class="group">' +
+      var sel = by[k].filter(rcSelectable), n = by[k].reduce(function (a, s) { return a + (s.todo || 0); }, 0), tot = by[k].reduce(function (a, s) { return a + (s.total || 0); }, 0);
+      var picked = by[k].filter(function (s) { return state.rcSel[s.studentId] && rcSelectable(s); }).length, flagged = by[k].filter(function (s) { return s.error || s.check; }).length;
+      return '<details class="rc-box" data-rcbatch="' + esc(k) + '"' + (state.rcOpen[k] ? ' open' : '') + '><summary><span class="grow"><span class="rc-bname">' + esc(k) + '</span>' +
+        '<span class="rc-bsub">' + by[k].length + (by[k].length === 1 ? ' student · ' : ' students · ') + n + (n === 1 ? ' payment · ' : ' payments · ') + money(tot) + (picked ? ' · <b>' + picked + ' selected</b>' : '') + (flagged ? ' · <span class="rc-warn">' + flagged + ' to check</span>' : '') + '</span></span>' +
+        (sel.length ? '<button class="link" data-act="rc-selall" data-batch="' + esc(k) + '">' + (picked === sel.length ? 'Clear' : 'Select all') + '</button>' : '') + '<span class="chev">' + ICON.chev + '</span></summary><div class="group">' +
         by[k].map(function (s) {
           var on = !!state.rcSel[s.studentId], can1 = rcSelectable(s);
           var sub = s.error ? '<span class="rc-warn">' + esc(s.error) + '</span>' : (s.todo ? s.todo + (s.todo === 1 ? ' payment · ' : ' payments · ') + money(s.total) : '') + (s.check ? (s.todo ? ' · ' : '') + s.check + ' to check' : '') + (!s.program && s.todo ? ' · pick the program' : '');
           return '<div class="row rc-row"><label class="rc-check">' + (can1 ? '<input type="checkbox" data-rcsel="' + esc(s.studentId) + '"' + (on ? ' checked' : '') + ' aria-label="Select ' + esc(s.name) + '">' : '<span class="rc-dot"></span>') + '</label>' +
             '<button class="rc-open grow" data-act="rc-student" data-sid="' + esc(s.studentId) + '"><span class="title">' + esc(s.name) + '</span><span class="sub">' + esc(s.studentId) + ' · ' + sub + '</span></button><span class="chev">' + ICON.chev + '</span></div>';
-        }).join('') + '</div>';
+        }).join('') + '</div></details>';
     }).join('');
   }
   function rcSelected() {
@@ -1222,7 +1264,7 @@
     if (rcListeners) return; rcListeners = true;
     $('page').addEventListener('change', function (e) {
       var t = e.target;
-      if (t.dataset && t.dataset.rcsel !== undefined && current().page === 'receipts') { state.rcSel[t.dataset.rcsel] = t.checked; rcMakeBar(); }
+      if (t.dataset && t.dataset.rcsel !== undefined && current().page === 'receipts') { state.rcSel[t.dataset.rcsel] = t.checked; rcMakeBar(); var y0 = window.scrollY; if ($('rc-todo')) $('rc-todo').innerHTML = rcTodoHtml(); window.scrollTo(0, y0); }
       else if (t.dataset && t.dataset.rcpay !== undefined && current().page === 'receiptStudent') { state.rcPick[t.dataset.rcpay] = t.checked; rcStudentBar(); }
       else if (t.id === 'rc-prog') { state.rcProgram = t.value; rcStudentBar(); }
       else if (t.id === 'rc-file') { rcImportFile(t.files && t.files[0]); t.value = ''; }
@@ -1993,6 +2035,7 @@
         case 'cb-out': return cashBookOutAct();
         case 'cb-close': return cashBookCloseAct();
         case 'cb-remove': return cashBookRemoveAct(b.dataset.id);
+        case 'cash-pdf': if (b.closest('#dlg')) closeDialog(); return cashPdfAct(b.dataset.cash, b.closest('#dlg') ? null : b);
         case 'rc-open': return openReceipt(b.dataset.no, b.dataset.sid, b);
         case 'rc-student': return go('receiptStudent', { sid: b.dataset.sid });
         case 'rc-view': state.rcView = null; return go('receiptView', { no: b.dataset.no, sid: b.dataset.sid || '' });
@@ -2000,7 +2043,7 @@
         case 'rc-void': return rcVoidAct();
         case 'rc-make': return rcMakeAct(b);
         case 'rc-make-one': return rcMakeOneAct(b);
-        case 'rc-selall': { var bn = b.dataset.batch, tt = state.rcTodo; if (!tt) return; var ss2 = tt.students.filter(function (s) { return (s.batch || 'No batch') === bn && rcSelectable(s); }); var allOn = ss2.every(function (s) { return state.rcSel[s.studentId]; }); ss2.forEach(function (s) { state.rcSel[s.studentId] = !allOn; }); if ($('rc-todo')) $('rc-todo').innerHTML = rcTodoHtml(); return rcMakeBar(); }
+        case 'rc-selall': e.preventDefault(); { var bn = b.dataset.batch, tt = state.rcTodo; if (!tt) return; var ss2 = tt.students.filter(function (s) { return (s.batch || 'No batch') === bn && rcSelectable(s); }); var allOn = ss2.every(function (s) { return state.rcSel[s.studentId]; }); ss2.forEach(function (s) { state.rcSel[s.studentId] = !allOn; }); if ($('rc-todo')) $('rc-todo').innerHTML = rcTodoHtml(); return rcMakeBar(); }
         case 'refresh-rc': state.rcTodo = null; return loadRcTodo(true);
         case 'rc-settings-save': return rcSettingsSave(b);
         case 'install': return install();
@@ -2012,7 +2055,7 @@
           });
       }
     });
-    document.addEventListener('toggle', function (e) { var dd = e.target; if (dd && dd.dataset && dd.dataset.more) state.openMore[dd.dataset.more] = dd.open; }, true);
+    document.addEventListener('toggle', function (e) { var dd = e.target; if (dd && dd.dataset && dd.dataset.more) state.openMore[dd.dataset.more] = dd.open; if (dd && dd.dataset && dd.dataset.rcbatch !== undefined) state.rcOpen[dd.dataset.rcbatch] = dd.open; }, true);
     document.addEventListener('submit', function (e) { if (e.target.id !== 'login-form') e.preventDefault(); });
     window.addEventListener('scroll', onScroll, { passive: true });
     document.addEventListener('visibilitychange', function () {
