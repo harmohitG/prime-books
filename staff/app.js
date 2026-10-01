@@ -6,7 +6,7 @@
 
   var VERSION = '2.0';
   var LS = { url: 'prime_api_url', token: 'prime_token', user: 'prime_user', tab: 'prime_tab', seg: 'prime_seg' };
-  var POLL_MS = 30000, LOCK_AFTER_MS = 5 * 60 * 1000, API_TIMEOUT_MS = 30000;
+  var POLL_MS = 30000, LOCK_AFTER_MS = 15 * 60 * 1000, API_TIMEOUT_MS = 30000;
 
   var state = {
     url: null, token: null, user: null, unlocked: false,
@@ -72,7 +72,7 @@
       document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) {} document.body.removeChild(ta); return ok;
     }
   }
-  function validUrl(u) { return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec\/?$/.test(String(u || '').trim()); }
+  function validUrl(u) { u = String(u || '').trim(); return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec\/?$/.test(u) || /^https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev\/api$/.test(u); }
   function can(k) { return !!(state.user && state.user.can && state.user.can[k]); }
 
   var ICON = {
@@ -105,7 +105,7 @@
   /* =================================================================== API */
   function api(fn, args) {
     var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, API_TIMEOUT_MS) : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, fn === 'lookupRefresh' ? 100000 : API_TIMEOUT_MS) : null;   // re-reading the workbook from Drive can take a while
     var opts = { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: fn, args: args || [] }), redirect: 'follow' };
     if (ctrl) opts.signal = ctrl.signal;
     return fetch(state.url, opts)
@@ -1451,7 +1451,7 @@
       h += '<div class="group-head">Security</div><div class="group">' +
         '<button class="row" data-act="change-pin"><span class="ic">' + ICON.lock + '</span><span class="grow"><span class="title">Change PIN</span></span><span class="chev">' + ICON.chev + '</span></button>' +
         '<button class="row" data-act="go" data-page="password"><span class="ic grey">' + ICON.key + '</span><span class="grow"><span class="title">Change password</span></span><span class="chev">' + ICON.chev + '</span></button>' +
-        '<button class="row" data-act="lock"><span class="ic blue">' + ICON.lock + '</span><span class="grow"><span class="title">Lock now</span><span class="sub">The app also locks after 5 minutes in the background.</span></span></button></div>';
+        '<button class="row" data-act="lock"><span class="ic blue">' + ICON.lock + '</span><span class="grow"><span class="title">Lock now</span><span class="sub">The app also locks after 15 minutes in the background.</span></span></button></div>';
       h += pushRowHtml();
       if (can('cash_take')) h += '<div class="group-head">Today</div><div class="group"><div class="row"><span class="ic green">' + ICON.cash + '</span><span class="grow"><span class="title">Cash you took today</span><span class="sub">' + (state.cashMine ? state.cashMine.count + (state.cashMine.count === 1 ? ' payment' : ' payments') + '. Count your drawer against this.' : 'Loading\u2026') + '</span></span><span class="value strong">' + (state.cashMine ? money(state.cashMine.total) : '') + '</span></div></div>';
       if (!standalone()) h += '<div class="group-head">App</div><div class="group"><button class="row" data-act="install"><span class="ic violet">' + ICON.home + '</span><span class="grow"><span class="title">Add to home screen</span><span class="sub">Opens full screen like an app.</span></span><span class="chev">' + ICON.chev + '</span></button></div>';
@@ -1631,7 +1631,9 @@
     if (qo && /^\d{1,7}$/.test(qo)) { state.pendingOrder = Number(qo); history.replaceState(null, '', location.pathname); }
     // The server link comes from config.js (published with the app). A link typed on the setup screen is only used when config.js has none.
     var cfgUrl = window.PRIME_CONFIG && validUrl(window.PRIME_CONFIG.api) ? window.PRIME_CONFIG.api : null;
-    if (cfgUrl && get(LS.url) && get(LS.url) !== cfgUrl) { set(LS.url, null); set(LS.token, null); set(LS.user, null); }
+    // A new server link signs this phone out, unless config.js says the new server carries the same accounts (the Cloudflare move).
+    var carried = (window.PRIME_CONFIG && window.PRIME_CONFIG.sameAccountsAs) || [];
+    if (cfgUrl && get(LS.url) && get(LS.url) !== cfgUrl) { if (carried.indexOf(get(LS.url)) !== -1) set(LS.url, cfgUrl); else { set(LS.url, null); set(LS.token, null); set(LS.user, null); } }
     state.url = cfgUrl || get(LS.url) || null;
     if (!state.url) return screen('setup');
     state.token = get(LS.token);
