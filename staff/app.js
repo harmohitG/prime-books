@@ -1220,14 +1220,12 @@
   function rcSearch() {
     var q = ($('rc-q') ? $('rc-q').value : '').trim(); state.rcQ = q;
     var out = $('rc-results'); if (!out) return;
-    if (q.length < 2) { out.innerHTML = ''; return; }
-    out.innerHTML = loadingHtml();
+    if (q.length === 1) return;
+    if (!out.innerHTML) out.innerHTML = loadingHtml();
     sapi('receiptsSearch', [q]).then(function (r) {
       if (($('rc-q') ? $('rc-q').value.trim() : '') !== q || !$('rc-results')) return;
-      var h = '';
-      if (r.students.length) h += '<div class="group-head">Students</div><div class="group">' + r.students.map(function (s) { return '<button class="row" data-act="rc-student" data-sid="' + esc(s.studentId) + '"><span class="grow"><span class="title">' + esc(s.name) + '</span><span class="sub">' + esc(s.studentId) + ' · ' + esc(s.batch) + '</span></span><span class="chev">' + ICON.chev + '</span></button>'; }).join('') + '</div>';
-      if (r.receipts.length) h += '<div class="group-head">Receipts</div><div class="group">' + r.receipts.map(rcRowHtml).join('') + '</div>';
-      $('rc-results').innerHTML = h || '<p class="group-foot">Nothing matches “' + esc(q) + '”.</p>';
+      var h = r.receipts.length ? '<div class="group-head">' + (q ? 'Receipts' : 'Latest from the app') + '</div><div class="group">' + r.receipts.map(rcRowHtml).join('') + '</div>' : '';
+      $('rc-results').innerHTML = h || (q ? '<p class="group-foot">Nothing matches “' + esc(q) + '”.</p>' : '<div class="empty">' + ICON.receipt + '<strong>No receipts yet</strong>Cash taken at the desk gets its receipt here.</div>');
     }).catch(function (e) { if (!e.signedOut && $('rc-results')) $('rc-results').innerHTML = '<p class="error">' + esc(e.message) + '</p>'; });
   }
   function rcRowHtml(r) {
@@ -1237,11 +1235,18 @@
   }
   function rcImportFile(file) {
     if (!file) return;
-    var rd = new FileReader();
-    rd.onload = function () {
-      var data; try { data = JSON.parse(String(rd.result)); } catch (e) { data = null; }
+    var excel = /\.(xlsm|xlsx)$/i.test(file.name);
+    if (excel && (typeof DecompressionStream === 'undefined' || !window.PrimeRM)) return dialog({ title: 'Use a computer for this', html: 'This browser can’t open Excel files. Do it in Chrome or Edge on your laptop.', ok: 'OK', noCancel: true });
+    toast(excel ? 'Reading ' + file.name + '…' : 'Reading…');
+    (excel ? file.arrayBuffer().then(function (buf) { return window.PrimeRM.fromWorkbook(buf); }).then(function (r) {
+      return { kind: 'prime-receipt-history', from: file.name + ' (Receipt_Log, ' + r.rows + ' rows)', made: new Date(file.lastModified).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }), receipts: r.receipts };
+    }) : file.text().then(function (t) { try { return JSON.parse(t); } catch (e) { return null; } })).then(function (data) { rcImportData(data); },
+      function (e) { dialog({ title: 'Couldn’t read that file', html: esc(e.message || String(e)), ok: 'OK', noCancel: true }); });
+  }
+  function rcImportData(data) {
+    (function () {
       var list = data && data.kind === 'prime-receipt-history' && Array.isArray(data.receipts) ? data.receipts : null;
-      if (!list || !list.length) return dialog({ title: 'Not a receipt history file', html: 'Choose the <b>receipt-history.json</b> file made from the Receipt Maker.', ok: 'OK', noCancel: true });
+      if (!list || !list.length) return dialog({ title: 'No receipts in that file', html: 'Choose <b>Receipt_Maker.xlsm</b> (the one with the Receipt_Log sheet).', ok: 'OK', noCancel: true });
       dialog({ title: 'Import ' + list.length + (list.length === 1 ? ' receipt?' : ' receipts?'), html: 'From ' + esc(data.from || 'the Receipt Maker') + (data.made ? ' (' + esc(data.made) + ')' : '') + '. Receipts already here are skipped; nothing is overwritten. New receipts will carry on from these numbers.', ok: 'Import' }).then(function (ok) {
         if (!ok) return;
         var i = 0, added = 0, skipped = 0, conflicts = [], conflictCount = 0, numbering = false;
@@ -1257,8 +1262,7 @@
             .catch(function (e) { state.busy = false; if (!e.signedOut) dialog({ title: 'Import stopped', html: esc(e.message) + '<br>' + added + ' were added before it stopped. Running it again is safe.', ok: 'OK', noCancel: true }); });
         })();
       });
-    };
-    rd.readAsText(file);
+    })();
   }
   function rcListen() {
     if (rcListeners) return; rcListeners = true;
@@ -1276,16 +1280,63 @@
     title: 'Receipts', root: true,
     right: function () { return navBtn('refresh-rc', ICON.refresh, 'Refresh'); },
     html: function () {
+      // for now the app makes receipts for cash taken at the desk; the Receipt Maker still does the rest (kept in step below)
       var h = '<div class="large-row"><h1 class="large">Receipts</h1></div>' +
-        '<div class="search">' + ICON.search + '<input id="rc-q" type="search" placeholder="Student name, ID or receipt no." autocomplete="off" value="' + esc(state.rcQ || '') + '"></div><div id="rc-results"></div>' +
-        '<div class="group-head">To receipt</div><div id="rc-todo">' + rcTodoHtml() + '</div><div id="rc-make" class="rc-make" hidden></div>';
-      if (can('override')) h += '<div class="group-head" style="margin-top:28px">Owner</div><div class="group">' +
-        '<label class="row" for="rc-file"><span class="ic violet">' + ICON.receipt + '</span><span class="grow"><span class="title">Import Receipt Maker history</span><span class="sub">The receipt-history.json file. Safe to run again.</span></span><input id="rc-file" type="file" accept=".json,application/json" hidden></label>' +
+        '<div class="search">' + ICON.search + '<input id="rc-q" type="search" placeholder="Name, student ID or receipt no." autocomplete="off" value="' + esc(state.rcQ || '') + '"></div>' +
+        '<div id="rc-results">' + loadingHtml() + '</div>' +
+        '<p class="group-foot">Cash taken at the desk gets its receipt here. Everything else is still made in the Receipt Maker.</p>';
+      if (can('override')) h += '<div class="group-head" style="margin-top:28px">Keep the Receipt Maker in step</div><div class="group">' +
+        '<button class="row" data-act="go" data-page="receiptLog"><span class="ic green">' + ICON.receipt + '</span><span class="grow"><span class="title">Copy the app’s receipts to Receipt_Log</span><span class="sub" id="rc-log-sub">So the Receipt Maker knows these numbers</span></span><span class="chev">' + ICON.chev + '</span></button>' +
+        '<label class="row" for="rc-file"><span class="ic violet">' + ICON.sheet + '</span><span class="grow"><span class="title">Bring in the Receipt Maker’s receipts</span><span class="sub">Choose Receipt_Maker.xlsm. Do this before taking cash if you made receipts there.</span></span><input id="rc-file" type="file" accept=".xlsm,.xlsx,.json" hidden></label>' +
         '<button class="row" data-act="go" data-page="receiptSettings"><span class="ic grey">' + ICON.admin + '</span><span class="grow"><span class="title">Receipt settings</span><span class="sub">Titles under “Issued by”, outside receipt numbers</span></span><span class="chev">' + ICON.chev + '</span></button></div>';
       return h;
     },
-    after: function () { rcListen(); rcMakeBar(); loadRcTodo(false); if (state.rcQ) rcSearch(); }
+    after: function () {
+      rcListen(); rcSearch();
+      if (can('override')) sapi('receiptsForLog').then(function (r) { var el = $('rc-log-sub'); if (el) el.innerHTML = r.receipts.length ? '<b>' + r.receipts.length + ' waiting</b> · so the Receipt Maker knows these numbers' : 'All copied'; }).catch(function () {});
+    }
   };
+  /* ---------- the app's receipts -> Receipt_Log (paste at the bottom of the table) ---------- */
+  PAGES.receiptLog = {
+    title: 'Copy to Receipt_Log',
+    html: function () {
+      var r = state.rcLog; if (!r) return loadingHtml();
+      if (!r.receipts.length) return '<div class="empty">' + ICON.check + '<strong>All copied</strong>Every receipt made in the app is in the Receipt Maker’s log.</div>';
+      var lines = r.receipts.reduce(function (t, x) { return t + x.lines.length; }, 0);
+      return '<p class="lead">' + r.receipts.length + (r.receipts.length === 1 ? ' receipt' : ' receipts') + ' (' + lines + (lines === 1 ? ' row' : ' rows') + ') made in the app aren’t in Receipt_Log yet.</p>' +
+        '<div class="group">' + r.receipts.map(rcRowHtml).join('') + '</div>' +
+        '<div class="group-head">On your laptop</div><ol class="steps"><li>Tap <b>Copy rows</b> (or download the file).</li><li>In Receipt_Maker.xlsm, open <b>Receipt_Log</b>, click the first empty cell in column A under the table, and paste.</li><li>Save the Receipt Maker, then tap <b>I’ve pasted them</b>.</li></ol>' +
+        '<button class="btn primary block" data-act="rc-log-copy">Copy rows</button>' +
+        '<button class="btn block" data-act="rc-log-csv" style="margin-top:8px">Download as a file (.csv)</button>' +
+        '<button class="btn block" data-act="rc-log-done" style="margin-top:20px">I’ve pasted them</button>' +
+        '<p class="group-foot">Voided receipts are included marked Void, so their numbers stay used in the Receipt Maker too.</p>';
+    },
+    after: function (c) {
+      if (c.params.loaded) return; c.params.loaded = true; state.rcLog = null;
+      sapi('receiptsForLog').then(function (r) { state.rcLog = r; if (current().page === 'receiptLog') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+    }
+  };
+  function rcLogCopy() {
+    var r = state.rcLog; if (!r || !r.receipts.length) return;
+    var text = window.PrimeRM.tsv(window.PrimeRM.logRows(r.receipts));
+    var done = function () { toast('Copied ' + text.split('\n').length + ' rows. Paste them in Receipt_Log.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { rcLogCsv(); });
+    else rcLogCsv();
+  }
+  function rcLogCsv() {
+    var r = state.rcLog; if (!r || !r.receipts.length) return;
+    var blob = new Blob([window.PrimeRM.csv(window.PrimeRM.logRows(r.receipts))], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = 'Receipt_Log rows from PRIME Staff ' + new Date().toISOString().slice(0, 10) + '.csv'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function rcLogDone(btn) {
+    var r = state.rcLog; if (!r || !r.receipts.length) return;
+    dialog({ title: 'Pasted in Receipt_Log?', html: 'Only say yes once the ' + r.receipts.length + (r.receipts.length === 1 ? ' receipt is' : ' receipts are') + ' in the Receipt Maker and it’s saved. They won’t be offered again.', ok: 'Yes, they’re in' }).then(function (ok) {
+      if (!ok) return; btn.disabled = true;
+      sapi('receiptsLogMark', [r.receipts.map(function (x) { return x.no + '|' + x.studentId; })]).then(function (m) { toast(m.marked + ' marked as copied'); back(); })
+        .catch(function (e) { if (!e.signedOut) toast(e.message); }).then(function () { btn.disabled = false; });
+    });
+  }
   function loadRcStudent(sid) {
     return sapi('receiptsFor', [sid]).then(function (v) {
       state.rcStudent = v; state.rcPick = {}; state.rcProgram = v.program || '';
@@ -2046,6 +2097,9 @@
         case 'rc-selall': e.preventDefault(); { var bn = b.dataset.batch, tt = state.rcTodo; if (!tt) return; var ss2 = tt.students.filter(function (s) { return (s.batch || 'No batch') === bn && rcSelectable(s); }); var allOn = ss2.every(function (s) { return state.rcSel[s.studentId]; }); ss2.forEach(function (s) { state.rcSel[s.studentId] = !allOn; }); if ($('rc-todo')) $('rc-todo').innerHTML = rcTodoHtml(); return rcMakeBar(); }
         case 'refresh-rc': state.rcTodo = null; return loadRcTodo(true);
         case 'rc-settings-save': return rcSettingsSave(b);
+        case 'rc-log-copy': return rcLogCopy();
+        case 'rc-log-csv': return rcLogCsv();
+        case 'rc-log-done': return rcLogDone(b);
         case 'install': return install();
         case 'revoke':
           return sapi('staffRevokeSession', [b.dataset.id]).then(function (r) { state.me = r; state.loadedAt.me = Date.now(); rerender(); toast('That phone is signed out'); }).catch(function (e3) { if (!e3.signedOut) toast(e3.message); });

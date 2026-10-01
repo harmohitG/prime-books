@@ -410,3 +410,5 @@ select#rc-prog { font: inherit; font-size: 15px; padding: 6px 8px; border-radius
 .rc-bname { display: block; font-weight: 600; font-size: 16px; }
 .rc-bsub { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
 .rc-box .link { font-size: 14px; padding: 4px 6px; white-space: nowrap; }
+ol.steps { margin: 4px 0 18px; padding: 12px 16px 12px 34px; background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow); font-size: 15px; line-height: 1.45; }
+ol.steps li { margin: 4px 0; }
