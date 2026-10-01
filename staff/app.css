@@ -379,3 +379,22 @@ body.sigfs-on { overflow: hidden; }
 .switch span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
 .switch input:checked + span { background: var(--accent); }
 .switch input:checked + span::after { transform: translateX(18px); }
+
+/* ---------- receipts ---------- */
+.app-ic.rose { background: linear-gradient(160deg, #ef6f8e, #d14469); }
+.btn svg { width: 17px; height: 17px; }
+.rc-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.rc-btns .btn.small { min-height: 30px; padding: 4px 10px; font-size: 13px; gap: 5px; }
+.rc-batch { display: flex; align-items: center; gap: 8px; margin-right: 6px; }
+.rc-batch .link { font-size: 13px; text-transform: none; letter-spacing: 0; padding: 2px 6px; }
+.rc-row { padding: 0 10px 0 0; gap: 0; }
+.rc-check { width: 48px; align-self: stretch; display: flex; align-items: center; justify-content: center; flex: none; }
+.rc-check input { width: 22px; height: 22px; accent-color: var(--accent); margin: 0; }
+.rc-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); opacity: .5; }
+.rc-open { text-align: left; padding: 10px 6px 10px 0; min-width: 0; background: transparent; font-size: 17px; }
+.rc-warn { color: var(--red); }
+.row.plain { padding-left: 16px; }
+.rc-make { position: sticky; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 5; margin-top: 14px; }
+.rc-make .btn { box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.rc-make .group-foot { margin: 6px 4px 0; }
+select#rc-prog { font: inherit; font-size: 15px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #d9dee1); background: var(--card, #fff); color: inherit; max-width: 100%; }

@@ -16,7 +16,8 @@
     stats: null, staff: null, activity: null, actFilter: 'all', settings: null, me: null, revealPin: {},
     timer: null, hiddenAt: 0, busy: false, deferredInstall: null, pin: { mode: 'unlock', digits: '', first: '', busy: false }, loadedAt: {},
     push: null, os: null, pushState: 'off', pendingOrder: null,
-    cash: null, cashRange: { key: 'today' }, cashRep: null, cashDetail: null, cashToday: null, cashMine: null, cashItems: null, cashBook: null, practice: false
+    cash: null, cashRange: { key: 'today' }, cashRep: null, cashDetail: null, cashToday: null, cashMine: null, cashItems: null, cashBook: null, practice: false,
+    rcTodo: null, rcSel: {}, rcStudent: null, rcPick: {}, rcProgram: '', rcView: null, rcQ: ''
   };
   /** true (and marks it) if `key` hasn't been loaded in the last `ms`: stops pages that re-render after loading from loading again. */
   function stale(key, ms) { var t = state.loadedAt[key] || 0; if (Date.now() - t < (ms || 15000)) return false; state.loadedAt[key] = Date.now(); return true; }
@@ -103,6 +104,7 @@
     box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4-8.5 4-8.5-4z"/><path d="M3.5 7.5v9l8.5 4 8.5-4v-9"/><path d="M12 11.5v9"/></svg>',
     cash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
     bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
+    receipt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h12v19l-2.4-1.6-2.4 1.6-1.2-.8-1.2.8-2.4-1.6L6 21.5z"/><path d="M9 7.5h6M9 11h6M9 14.5h4"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/></svg>'
   };
 
@@ -279,6 +281,7 @@
   function tabsFor() {
     var t = [{ key: 'home', label: 'Home', icon: ICON.house }, { key: 'orders', label: 'Book orders', icon: ICON.orders }];
     if (can('cash_take')) t.push({ key: 'cash', label: 'Cash', icon: ICON.cash });
+    if (can('receipts')) t.push({ key: 'receipts', label: 'Receipts', icon: ICON.receipt });
     if (can('stock_view')) t.push({ key: 'stock', label: 'Stock', icon: ICON.stock });
     if (can('admin')) t.push({ key: 'admin', label: 'Admin', icon: ICON.admin });
     t.push({ key: 'me', label: 'Me', icon: ICON.me });
@@ -364,6 +367,7 @@
       // the sections, like apps on a phone
       var apps = [['orders', 'Book orders', ICON.book, 'blue', can('confirm') ? c.waiting : c.ready]];
       if (can('cash_take')) { apps.push(['cash', 'Cash', ICON.cash, 'green', 0]); apps.push(['@cashbook', 'Cash book', ICON.sheet, 'teal', 0]); }
+      if (can('receipts')) apps.push(['receipts', 'Receipts', ICON.receipt, 'rose', 0]);
       if (can('stock_view')) apps.push(['stock', 'Stock', ICON.stock, 'amber', lowN]);
       if (can('admin')) apps.push(['admin', 'Admin', ICON.admin, 'violet', 0]);
       apps.push(['me', 'Me', ICON.me, 'grey', 0]);
@@ -950,7 +954,10 @@
       sapi('cashRecord', [form]).then(function (x) {
         buzz(30); state.cash = newCashState(); pads = {}; state.loadedAt.me = 0;
         state.stack = []; state.tab = 'cash'; state.cashRep = null; state.cashMine = null; render(); loadOrders(true); refreshStockQuiet();
-        dialog({ title: 'Saved · ' + x.cashId, html: '<b>' + money(x.amount) + '</b> for ' + esc(x.summary) + '.' + (x.handOver ? '<br>Hand over: <b>' + esc(x.handOver) + '</b>.' : '') + '<br>' + (can('cash_report') ? 'It\u2019s in the Cash tab, and emailed to you.' : 'The admin has been notified.'), ok: 'Done', noCancel: true });
+        var savedHtml = '<b>' + money(x.amount) + '</b> for ' + esc(x.summary) + '.' + (x.handOver ? '<br>Hand over: <b>' + esc(x.handOver) + '</b>.' : '') + '<br>' + (can('cash_report') ? 'It\u2019s in the Cash tab, and emailed to you.' : 'The admin has been notified.');
+        var rcs = x.receipts || [];
+        if (rcs.length) offerReceipts(rcs, { title: 'Saved · ' + x.cashId, html: savedHtml + '<br>Receipt <b>' + esc(rcs.map(function (r) { return r.no; }).join(', ')) + '</b> is ready for the student.', ok: 'Print receipt', cancel: 'Done', after: 'The receipt is saved: print it later from the Cash tab.' });
+        else dialog({ title: 'Saved · ' + x.cashId, html: savedHtml + (x.receiptNote ? '<br><span class="muted">' + esc(x.receiptNote) + '</span>' : ''), ok: 'Done', noCancel: true });
       }).catch(function (e) { if (!e.signedOut) { err('cash-error', e.message); var bb = $('cash-go'); if (bb) { bb.disabled = false; bb.textContent = cashGoText(amt); } } })
         .then(function () { state.busy = false; });
     });
@@ -996,7 +1003,8 @@
     var h = '<div class="cash-sum"><div class="s-num">' + money(m.total) + '</div><div class="s-label">You took today · ' + m.count + (m.count === 1 ? ' payment' : ' payments') + '. Count your drawer against this.</div></div>';
     if (!m.records || !m.records.length) return h;
     return h + '<div class="group-head">Today</div><div class="group">' + m.records.map(function (x) {
-      return '<div class="row"><span class="grow"><span class="title">' + esc(x.cashId) + ' · ' + esc(titleCase(x.workbookName || x.name)) + '</span><span class="sub">' + esc(x.summary) + ' · ' + esc(timeOf(x.at)) + '</span></span><span class="value strong">' + money(x.amount) + '</span></div>';
+      return '<div class="row"><span class="grow"><span class="title">' + esc(x.cashId) + ' · ' + esc(titleCase(x.workbookName || x.name)) + (x.test ? ' <span class="chip test">TEST</span>' : '') + '</span><span class="sub">' + esc(x.summary) + ' · ' + esc(timeOf(x.at)) + '</span>' +
+        ((x.receipts || []).length ? '<span class="rc-btns">' + x.receipts.map(rcButton).join('') + '</span>' : '') + '</span><span class="value strong">' + money(x.amount) + '</span></div>';
     }).join('') + '</div>';
   }
   function loadCashMine() {
@@ -1039,6 +1047,7 @@
       var h = (x.status === 'void' ? '<div class="banner red">' + ICON.warn + '<span class="grow">Voided ' + esc(when(x.voidAt)) + ' by @' + esc(x.voidBy) + ': ' + esc(x.voidReason) + '</span></div>' : '') +
         (x.flags.length ? '<div class="c-tags" style="margin:0 0 12px">' + x.flags.map(function (f) { return '<span class="tag">' + esc(f) + '</span>'; }).join('') + '</div>' : '') +
         '<div class="group"><dl class="kv" style="padding:6px 16px 10px">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl></div>' +
+        ((x.receipts || []).length ? '<div class="group-head">Student receipt</div><div class="rc-btns" style="margin:0 0 6px">' + x.receipts.map(function (r) { return rcButton(r) + (r.status === 'void' ? ' <span class="chip grey">VOID</span>' : ''); }).join('') + '</div>' : '') +
         '<div class="group-head">Student signature</div><div class="sig-view"><img alt="Student signature" src="' + esc(x.studentSig) + '"><span>' + esc(x.name) + '</span></div>' +
         '<div class="group-head">Received by</div><div class="sig-view"><img alt="Staff signature" src="' + esc(x.staffSig) + '"><span>' + esc(x.receivedByName) + '</span></div>';
       var acts = '';
@@ -1054,6 +1063,301 @@
       sapi('cashGet', [c.params.cash]).then(function (x) { state.cashDetail = x; if (current().page === 'cashDetail') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
     }
   };
+  /* =================================================================== Receipts (student receipts, Receipt Maker layout) */
+  var logoBytes = null, rcListeners = false;
+  function receiptLogo() {
+    if (logoBytes) return Promise.resolve(logoBytes);
+    return fetch('receipt-logo.jpg').then(function (r) { if (!r.ok) throw new Error('logo missing'); return r.arrayBuffer(); }).then(function (b) { logoBytes = new Uint8Array(b); return logoBytes; });
+  }
+  function buildReceiptPdf(list) {
+    return receiptLogo().then(function (logo) {
+      if (!window.PrimeReceipt) throw new Error('The receipt maker didn’t load. Close the app and open it again.');
+      return { blob: new Blob([window.PrimeReceipt.pdf(list, logo)], { type: 'application/pdf' }), name: window.PrimeReceipt.fileName(list), count: list.length };
+    });
+  }
+  /** The phone's share sheet has Print, Save to Files, AirDrop, email... Computers without it open the PDF in a new tab. */
+  function sharePdf(p) {
+    if (window.__receiptSink) return window.__receiptSink(p);   // tests
+    var file = null; try { file = new File([p.blob], p.name, { type: 'application/pdf' }); } catch (e) { file = null; }
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: p.name }).catch(function (e) { if (!e || e.name !== 'AbortError') openPdf(p); });
+    }
+    openPdf(p);
+  }
+  function openPdf(p) {
+    var url = URL.createObjectURL(p.blob), w = null;
+    try { w = window.open(url, '_blank'); } catch (e) { w = null; }
+    if (!w) { var a = document.createElement('a'); a.href = url; a.download = p.name; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(function () { URL.revokeObjectURL(url); }, 120000);
+  }
+  /** Builds the PDF first, then asks: the tap on "Print" opens the share sheet straight away (phones need a tap for that). */
+  function offerReceipts(list, o) {
+    o = o || {};
+    return buildReceiptPdf(list).then(function (p) {
+      return dialog({ title: o.title || (list.length === 1 ? 'Receipt ' + list[0].no : list.length + ' receipts'), html: o.html || rcSummaryHtml(list), ok: o.ok || 'Print / share', cancel: o.cancel || 'Later' })
+        .then(function (r) { if (r) sharePdf(p); });
+    }).catch(function (e) { dialog({ title: 'Couldn’t make the PDF', html: esc(e.message) + (o.after ? '<br>' + o.after : ''), ok: 'OK', noCancel: true }); });
+  }
+  function rcSummaryHtml(list) {
+    if (list.length === 1) { var r = list[0]; return '<b>' + esc(r.name) + '</b> · ' + money(r.total) + '<br>' + esc(r.lines.map(function (l) { return l.desc; }).join(', ')); }
+    var t = list.reduce(function (a, r) { return a + r.total; }, 0);
+    return list.length + ' receipts, ' + money(t) + ' in all. One PDF, one receipt per page.';
+  }
+  function openReceipt(no, sid, btn) {
+    var label = btn ? btn.innerHTML : ''; if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>'; }
+    return sapi('receiptGet', [no, sid || '']).then(function (r) { return offerReceipts([r]); })
+      .catch(function (e) { if (!e.signedOut) toast(e.message); }).then(function () { if (btn) { btn.disabled = false; btn.innerHTML = label; } });
+  }
+  function rcButton(r) { return '<button class="btn small" data-act="rc-open" data-no="' + esc(r.no) + '" data-sid="' + esc(r.studentId || '') + '">' + ICON.receipt + 'Receipt ' + esc(r.no) + '</button>'; }
+  function rcDate(ymd) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || '')); return m ? new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : String(ymd || ''); }
+  var RC_STATUS = { done: ['green', 'Receipted'], todo: ['amber', 'To receipt'], check: ['red', 'Check'], changed: ['red', 'Differs'] };
+
+  function loadRcTodo(force) {
+    if (!force && state.rcTodo && Date.now() - (state.rcTodoAt || 0) < 60000) return Promise.resolve();
+    if ($('rc-todo')) $('rc-todo').innerHTML = loadingHtml();
+    return sapi('receiptsTodo').then(function (t) { state.rcTodo = t; state.rcTodoAt = Date.now(); if (current().page === 'receipts' && $('rc-todo')) { $('rc-todo').innerHTML = rcTodoHtml(); rcMakeBar(); } })
+      .catch(function (e) { if (!e.signedOut) { if ($('rc-todo')) $('rc-todo').innerHTML = '<p class="error">' + esc(e.message) + '</p>'; } });
+  }
+  function rcSelectable(s) { return !s.error && s.todo > 0 && !!s.program; }
+  function rcTodoHtml() {
+    var t = state.rcTodo; if (!t) return loadingHtml();
+    var list = t.students.filter(function (s) { return s.todo || s.check || s.error; });
+    var head = '<p class="group-foot" style="margin-top:0">From ' + esc(t.sourceName || 'the accounting workbook') + '. A payment needs an amount, a date and a method like E-Transfer or Cash. ' + t.registerCount + (t.registerCount === 1 ? ' receipt' : ' receipts') + ' on file.</p>';
+    if (!list.length) return head + '<div class="empty">' + ICON.check + '<strong>All receipted</strong>Every payment in the workbook has its receipt.</div>';
+    var by = {}, order = [];
+    list.forEach(function (s) { var k = s.batch || 'No batch'; if (!by[k]) { by[k] = []; order.push(k); } by[k].push(s); });
+    return head + order.map(function (k) {
+      var sel = by[k].filter(rcSelectable), n = by[k].reduce(function (a, s) { return a + (s.todo || 0); }, 0);
+      return '<div class="group-head rc-batch"><span class="grow">' + esc(k) + ' · ' + n + (n === 1 ? ' payment' : ' payments') + '</span>' + (sel.length ? '<button class="link" data-act="rc-selall" data-batch="' + esc(k) + '">Select all</button>' : '') + '</div><div class="group">' +
+        by[k].map(function (s) {
+          var on = !!state.rcSel[s.studentId], can1 = rcSelectable(s);
+          var sub = s.error ? '<span class="rc-warn">' + esc(s.error) + '</span>' : (s.todo ? s.todo + (s.todo === 1 ? ' payment · ' : ' payments · ') + money(s.total) : '') + (s.check ? (s.todo ? ' · ' : '') + s.check + ' to check' : '') + (!s.program && s.todo ? ' · pick the program' : '');
+          return '<div class="row rc-row"><label class="rc-check">' + (can1 ? '<input type="checkbox" data-rcsel="' + esc(s.studentId) + '"' + (on ? ' checked' : '') + ' aria-label="Select ' + esc(s.name) + '">' : '<span class="rc-dot"></span>') + '</label>' +
+            '<button class="rc-open grow" data-act="rc-student" data-sid="' + esc(s.studentId) + '"><span class="title">' + esc(s.name) + '</span><span class="sub">' + esc(s.studentId) + ' · ' + sub + '</span></button><span class="chev">' + ICON.chev + '</span></div>';
+        }).join('') + '</div>';
+    }).join('');
+  }
+  function rcSelected() {
+    var t = state.rcTodo; if (!t) return [];
+    return t.students.filter(function (s) { return state.rcSel[s.studentId] && rcSelectable(s); });
+  }
+  function rcMakeBar() {
+    var bar = $('rc-make'); if (!bar) return;
+    var sel = rcSelected(), n = sel.reduce(function (a, s) { return a + s.todo; }, 0);
+    bar.hidden = !sel.length;
+    bar.innerHTML = '<button class="btn primary block" data-act="rc-make">' + ICON.receipt + 'Make receipts · ' + n + (n === 1 ? ' payment' : ' payments') + ', ' + sel.length + (sel.length === 1 ? ' student' : ' students') + '</button>';
+  }
+  /** Receipts for the chosen workbook payments, in chunks; one PDF at the end. */
+  function rcIssue(students, force, btn) {
+    var all = [], i = 0, label = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>'; }
+    state.busy = true;
+    function next() {
+      if (i >= students.length) return Promise.resolve();
+      var chunk = students.slice(i, i + 40); i += 40;
+      return sapi('receiptsIssue', [{ students: chunk, force: !!force }]).then(function (r) { all = all.concat(r.receipts); return next(); });
+    }
+    return next().then(function () {
+      state.rcTodo = null; state.rcSel = {}; state.rcStudent = null;
+      rerender();
+      return offerReceipts(all, { title: all.length === 1 ? 'Receipt ' + all[0].no + ' made' : all.length + ' receipts made', html: (all.length === 1 ? rcSummaryHtml(all) : 'Numbers ' + esc(all[0].no) + (all.length > 1 ? ' … ' + esc(all[all.length - 1].no) : '') + '. ' + rcSummaryHtml(all)) + '<br>They’re saved; you can print them again any time.' });
+    }).catch(function (e) {
+      if (e.signedOut) return;
+      state.rcTodo = null; rerender();
+      dialog({ title: all.length ? all.length + ' made, then a problem' : 'No receipts made', html: esc(e.message) + (all.length ? '<br>The ' + all.length + ' made are saved: open the students to print them.' : ''), ok: 'OK', noCancel: true });
+    }).then(function () { state.busy = false; if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = label; } });
+  }
+  function rcMakeAct(btn) {
+    var sel = rcSelected(); if (!sel.length) return;
+    var n = sel.reduce(function (a, s) { return a + s.todo; }, 0), total = sel.reduce(function (a, s) { return a + s.total; }, 0);
+    dialog({ title: 'Make receipts?', html: n + (n === 1 ? ' payment' : ' payments') + ' for ' + sel.length + (sel.length === 1 ? ' student' : ' students') + ', ' + money(total) + '.<br>Same-day payments share a receipt (up to 4 lines). Numbers carry on from each student’s last receipt and are never reused.', ok: 'Make receipts' }).then(function (r) {
+      if (!r) return;
+      rcIssue(sel.map(function (s) { return { studentId: s.studentId, keys: s.pays.filter(function (p) { return p.status === 'todo'; }).map(function (p) { return p.key; }) }; }), false, btn);
+    });
+  }
+  function rcSearch() {
+    var q = ($('rc-q') ? $('rc-q').value : '').trim(); state.rcQ = q;
+    var out = $('rc-results'); if (!out) return;
+    if (q.length < 2) { out.innerHTML = ''; return; }
+    out.innerHTML = loadingHtml();
+    sapi('receiptsSearch', [q]).then(function (r) {
+      if (($('rc-q') ? $('rc-q').value.trim() : '') !== q || !$('rc-results')) return;
+      var h = '';
+      if (r.students.length) h += '<div class="group-head">Students</div><div class="group">' + r.students.map(function (s) { return '<button class="row" data-act="rc-student" data-sid="' + esc(s.studentId) + '"><span class="grow"><span class="title">' + esc(s.name) + '</span><span class="sub">' + esc(s.studentId) + ' · ' + esc(s.batch) + '</span></span><span class="chev">' + ICON.chev + '</span></button>'; }).join('') + '</div>';
+      if (r.receipts.length) h += '<div class="group-head">Receipts</div><div class="group">' + r.receipts.map(rcRowHtml).join('') + '</div>';
+      $('rc-results').innerHTML = h || '<p class="group-foot">Nothing matches “' + esc(q) + '”.</p>';
+    }).catch(function (e) { if (!e.signedOut && $('rc-results')) $('rc-results').innerHTML = '<p class="error">' + esc(e.message) + '</p>'; });
+  }
+  function rcRowHtml(r) {
+    return '<button class="row' + (r.status === 'void' ? ' void' : '') + '" data-act="rc-view" data-no="' + esc(r.no) + '" data-sid="' + esc(r.studentId) + '"><span class="grow"><span class="title">' + esc(r.no) + ' · ' + esc(r.name) +
+      (r.status === 'void' ? ' <span class="chip grey">VOID</span>' : '') + (r.test ? ' <span class="chip test">TEST</span>' : '') + '</span><span class="sub">' + esc(rcDate(r.date)) + ' · ' + esc(r.lines.map(function (l) { return l.desc; }).join(', ')) +
+      (r.source === 'desk' ? ' · desk' : r.source === 'history' ? ' · Receipt Maker' : '') + '</span></span><span class="value strong">' + money(r.total) + '</span><span class="chev">' + ICON.chev + '</span></button>';
+  }
+  function rcImportFile(file) {
+    if (!file) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      var data; try { data = JSON.parse(String(rd.result)); } catch (e) { data = null; }
+      var list = data && data.kind === 'prime-receipt-history' && Array.isArray(data.receipts) ? data.receipts : null;
+      if (!list || !list.length) return dialog({ title: 'Not a receipt history file', html: 'Choose the <b>receipt-history.json</b> file made from the Receipt Maker.', ok: 'OK', noCancel: true });
+      dialog({ title: 'Import ' + list.length + (list.length === 1 ? ' receipt?' : ' receipts?'), html: 'From ' + esc(data.from || 'the Receipt Maker') + (data.made ? ' (' + esc(data.made) + ')' : '') + '. Receipts already here are skipped; nothing is overwritten. New receipts will carry on from these numbers.', ok: 'Import' }).then(function (ok) {
+        if (!ok) return;
+        var i = 0, added = 0, skipped = 0, conflicts = [], conflictCount = 0, numbering = false;
+        state.busy = true; toast('Importing…');
+        (function step() {
+          if (i >= list.length) {
+            state.busy = false; state.rcTodo = null; rerender();
+            return dialog({ title: 'Import done', html: added + ' added, ' + skipped + ' already here' + (conflictCount ? ', <b>' + conflictCount + ' different</b> (not changed):<br>' + conflicts.slice(0, 8).map(esc).join('<br>') : '.') +
+              (numbering ? '' : '<br><b>Receipts aren’t numbered yet:</b> the history has to come in with nothing different. Check those receipts, then import again.'), ok: 'OK', noCancel: true });
+          }
+          var chunk = list.slice(i, i + 250); i += 250;
+          sapi('receiptsImport', [chunk, i >= list.length && conflictCount === 0]).then(function (r) { added += r.added; skipped += r.skipped; conflictCount += r.conflictCount; conflicts = conflicts.concat(r.conflicts); numbering = r.numbering; toast('Importing… ' + Math.min(i, list.length) + ' / ' + list.length); step(); })
+            .catch(function (e) { state.busy = false; if (!e.signedOut) dialog({ title: 'Import stopped', html: esc(e.message) + '<br>' + added + ' were added before it stopped. Running it again is safe.', ok: 'OK', noCancel: true }); });
+        })();
+      });
+    };
+    rd.readAsText(file);
+  }
+  function rcListen() {
+    if (rcListeners) return; rcListeners = true;
+    $('page').addEventListener('change', function (e) {
+      var t = e.target;
+      if (t.dataset && t.dataset.rcsel !== undefined && current().page === 'receipts') { state.rcSel[t.dataset.rcsel] = t.checked; rcMakeBar(); }
+      else if (t.dataset && t.dataset.rcpay !== undefined && current().page === 'receiptStudent') { state.rcPick[t.dataset.rcpay] = t.checked; rcStudentBar(); }
+      else if (t.id === 'rc-prog') { state.rcProgram = t.value; rcStudentBar(); }
+      else if (t.id === 'rc-file') { rcImportFile(t.files && t.files[0]); t.value = ''; }
+    });
+    var timer = null;
+    $('page').addEventListener('input', function (e) { if (e.target.id === 'rc-q') { clearTimeout(timer); timer = setTimeout(rcSearch, 350); } });
+  }
+  PAGES.receipts = {
+    title: 'Receipts', root: true,
+    right: function () { return navBtn('refresh-rc', ICON.refresh, 'Refresh'); },
+    html: function () {
+      var h = '<div class="large-row"><h1 class="large">Receipts</h1></div>' +
+        '<div class="search">' + ICON.search + '<input id="rc-q" type="search" placeholder="Student name, ID or receipt no." autocomplete="off" value="' + esc(state.rcQ || '') + '"></div><div id="rc-results"></div>' +
+        '<div class="group-head">To receipt</div><div id="rc-todo">' + rcTodoHtml() + '</div><div id="rc-make" class="rc-make" hidden></div>';
+      if (can('override')) h += '<div class="group-head" style="margin-top:28px">Owner</div><div class="group">' +
+        '<label class="row" for="rc-file"><span class="ic violet">' + ICON.receipt + '</span><span class="grow"><span class="title">Import Receipt Maker history</span><span class="sub">The receipt-history.json file. Safe to run again.</span></span><input id="rc-file" type="file" accept=".json,application/json" hidden></label>' +
+        '<button class="row" data-act="go" data-page="receiptSettings"><span class="ic grey">' + ICON.admin + '</span><span class="grow"><span class="title">Receipt settings</span><span class="sub">Titles under “Issued by”, outside receipt numbers</span></span><span class="chev">' + ICON.chev + '</span></button></div>';
+      return h;
+    },
+    after: function () { rcListen(); rcMakeBar(); loadRcTodo(false); if (state.rcQ) rcSearch(); }
+  };
+  function loadRcStudent(sid) {
+    return sapi('receiptsFor', [sid]).then(function (v) {
+      state.rcStudent = v; state.rcPick = {}; state.rcProgram = v.program || '';
+      v.pays.forEach(function (p) { if (p.status === 'todo') state.rcPick[p.key] = true; });
+      if (current().page === 'receiptStudent') rerender();
+    }).catch(function (e) { if (!e.signedOut) { state.rcStudentErr = { sid: sid, msg: e.message }; if (current().page === 'receiptStudent') rerender(); } });
+  }
+  function rcStudentBar() {
+    var bar = $('rc-one'); if (!bar || !state.rcStudent) return;
+    var v = state.rcStudent, keys = Object.keys(state.rcPick).filter(function (k) { return state.rcPick[k]; });
+    var pays = v.pays.filter(function (p) { return keys.indexOf(p.key) !== -1; }), t = pays.reduce(function (a, p) { return a + p.amount; }, 0);
+    bar.hidden = !pays.length;
+    bar.innerHTML = '<button class="btn primary block" data-act="rc-make-one"' + (!state.rcProgram ? ' disabled' : '') + '>' + ICON.receipt + (pays.length === 1 ? 'Make receipt · ' : 'Make receipts · ') + money(t) + '</button>' + (!state.rcProgram ? '<p class="group-foot">Pick the program first.</p>' : '');
+  }
+  PAGES.receiptStudent = {
+    title: function (c) { return state.rcStudent && state.rcStudent.studentId === c.params.sid ? state.rcStudent.name : 'Student'; },
+    html: function (c) {
+      var v = state.rcStudent && state.rcStudent.studentId === c.params.sid ? state.rcStudent : null;
+      if (!v) return state.rcStudentErr && state.rcStudentErr.sid === c.params.sid ? '<div class="banner red">' + ICON.warn + '<span class="grow">' + esc(state.rcStudentErr.msg) + '</span></div>' : loadingHtml();
+      var kv = [['Student ID', esc(v.studentId)], ['Batch', esc(v.batch)], ['Next receipt no.', '<b>' + esc(v.nextNo) + '</b>']];
+      var prog = v.program ? esc(v.program) : '<select id="rc-prog"><option value="">Pick the program…</option>' + v.programs.map(function (p) { return '<option' + (state.rcProgram === p ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('') + '</select>';
+      kv.splice(2, 0, ['Program', prog]);
+      var h = '';
+      if (!v.program) h += '<div class="banner amber">' + ICON.warn + '<span class="grow">The workbook has no start date for this student, so pick the program for the receipt.</span></div>';
+      if (v.alsoOnId && v.alsoOnId.length) h += '<div class="banner amber">' + ICON.warn + '<span class="grow">This student ID is also on a row for ' + esc(v.alsoOnId.join(', ')) + ' in the workbook. Their receipt numbers would be shared: fix the ID when you can.</span></div>';
+      h += '<div class="group"><dl class="kv" style="padding:6px 16px 10px">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl></div>';
+      h += '<div class="group-head">Payments in the workbook</div>';
+      if (!v.pays.length) h += '<p class="group-foot">No payments with an amount, date and method yet.</p>';
+      else h += '<div class="group">' + v.pays.map(function (p) {
+        var st = RC_STATUS[p.status] || ['grey', p.status], pick = p.status === 'todo' || (p.status === 'check' && can('override'));
+        return '<label class="row' + (pick ? '' : ' plain') + '">' + (pick ? '<input type="checkbox" data-rcpay="' + esc(p.key) + '"' + (state.rcPick[p.key] ? ' checked' : '') + '>' : '') +
+          '<span class="grow"><span class="title">' + esc(p.desc) + ' <span class="chip ' + st[0] + '">' + st[1] + '</span></span><span class="sub">' + esc(rcDate(p.date)) + ' · ' + esc(p.method) + (p.receiptNo ? ' · ' + esc(p.receiptNo) : '') + (p.note ? '<br>' + esc(p.note) : '') + '</span></span><span class="value strong">' + money(p.amount) + '</span></label>';
+      }).join('') + '</div>';
+      if (v.pays.some(function (p) { return p.status === 'check'; })) h += '<p class="group-foot">' + (can('override') ? '“Check” may already have a desk receipt on another day. Tick it only after you’ve checked.' : 'The owner checks the ones marked “Check”.') + '</p>';
+      if (v.pays.some(function (p) { return p.status === 'changed'; })) h += '<p class="group-foot rc-warn">“Differs”: the workbook amount for that day no longer matches its receipt. Fix the workbook, or void that receipt and make it again.</p>';
+      if (v.issues && v.issues.length) h += '<p class="group-foot rc-warn">Not receipted, fix in the workbook: ' + esc(v.issues.map(function (x) { return x.desc + ' (' + (x.problem === 'amount' ? 'no amount' : x.problem === 'date' ? 'no date' : x.problem) + ')'; }).join(', ')) + '.</p>';
+      h += '<div id="rc-one" class="rc-make" hidden></div>';
+      h += '<div class="group-head">Receipts</div>' + (v.receipts.length ? '<div class="group">' + v.receipts.map(rcRowHtml).join('') + '</div>' : '<p class="group-foot">None yet.</p>');
+      return h;
+    },
+    after: function (c) {
+      rcListen(); rcStudentBar();
+      // (re)load when this student isn't in hand: first visit, or after a receipt was made / voided elsewhere
+      if (state.rcStudent && state.rcStudent.studentId === c.params.sid) return;
+      if (c.params.loading || (state.rcStudentErr && state.rcStudentErr.sid === c.params.sid && c.params.tried)) return;
+      c.params.loading = true; c.params.tried = true; state.rcStudentErr = null; state.rcStudent = null;
+      loadRcStudent(c.params.sid).then(function () { c.params.loading = false; });
+    }
+  };
+  function rcMakeOneAct(btn) {
+    var v = state.rcStudent; if (!v) return;
+    var keys = Object.keys(state.rcPick).filter(function (k) { return state.rcPick[k]; });
+    if (!keys.length) return;
+    var risky = v.pays.filter(function (p) { return keys.indexOf(p.key) !== -1 && p.status !== 'todo'; });
+    var go2 = function () { rcIssue([{ studentId: v.studentId, keys: keys, program: v.program ? '' : state.rcProgram }], risky.length > 0, btn); };
+    if (!risky.length) return go2();
+    dialog({ title: 'Receipt again?', html: esc(risky.map(function (p) { return p.desc + ' ' + rcDate(p.date) + ': ' + p.note; }).join('; ')) + '.<br>Only go ahead if the student has no receipt for it.', ok: 'Make it anyway', destructive: true }).then(function (r) { if (r) go2(); });
+  }
+  PAGES.receiptView = {
+    title: function (c) { return 'Receipt ' + c.params.no; },
+    html: function (c) {
+      var r = state.rcView && state.rcView.no === c.params.no && state.rcView.studentId === (c.params.sid || '') ? state.rcView : null;
+      if (!r) return loadingHtml();
+      var kv = [['Student', esc(r.name)], ['Student ID', esc(r.studentId || 'N/A')], ['Program', esc(r.program || 'N/A')], ['Date', esc(rcDate(r.date))], ['Total', '<b>' + money(r.total) + '</b>'], ['Issued by', esc(r.issuedBy)],
+        ['Made', esc(r.source === 'history' ? 'Receipt Maker (imported)' : (r.source === 'desk' ? 'At the desk' : 'From the workbook') + ' · ' + when(r.createdAt) + ' · @' + r.createdBy)]];
+      if (r.cashId) kv.push(['Cash record', esc(r.cashId)]);
+      var h = (r.status === 'void' ? '<div class="banner red">' + ICON.warn + '<span class="grow">VOID: ' + esc(r.voidReason) + '</span></div>' : '') + (r.test ? '<div class="banner amber">' + ICON.warn + '<span class="grow">TEST receipt from practice mode.</span></div>' : '') +
+        '<div class="group"><dl class="kv" style="padding:6px 16px 10px">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl></div>' +
+        '<div class="group-head">Lines</div><div class="group">' + r.lines.map(function (l) { return '<div class="row"><span class="grow"><span class="title">' + esc(l.desc) + '</span><span class="sub">' + esc(l.method) + ' · ' + esc(rcDate(l.date)) + '</span></span><span class="value strong">' + money(l.amount) + '</span></div>'; }).join('') + '</div>' +
+        '<button class="btn primary block" data-act="rc-print" style="margin-top:16px">' + ICON.receipt + 'Print / share PDF</button>';
+      if (r.status !== 'void' && can('override')) h += '<div class="group" style="margin-top:26px"><button class="row danger" data-act="rc-void"><span class="grow"><span class="title">Void this receipt</span><span class="sub">Owner only. The number stays used; it prints with VOID across it.</span></span></button></div>';
+      return h;
+    },
+    after: function (c) {
+      if (c.params.loaded) return; c.params.loaded = true;
+      sapi('receiptGet', [c.params.no, c.params.sid || '']).then(function (r) { state.rcView = r; if (current().page === 'receiptView') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+    }
+  };
+  function rcVoidAct() {
+    var r = state.rcView; if (!r) return;
+    dialog({ title: 'Void ' + r.no + '?', html: money(r.total) + ' for ' + esc(r.name) + '. The number won’t be used again.', inputs: [{ key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }], ok: 'Void', destructive: true,
+      validate: function (v) { return v.reason.length < 3 ? 'Say why.' : ''; } }).then(function (v) {
+      if (!v) return;
+      sapi('receiptVoid', [r.no, r.studentId, v.reason]).then(function (x) { state.rcView = x; state.rcStudent = null; state.rcTodo = null; rerender(); toast('Receipt ' + x.no + ' voided'); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+    });
+  }
+  PAGES.receiptSettings = {
+    title: 'Receipt settings',
+    html: function () {
+      var s = state.settings, st = state.rcStaff;
+      if (!s || !st) return loadingHtml();
+      var titles = {}; try { titles = JSON.parse(s.receipt_titles || '{}') || {}; } catch (e) { titles = {}; }
+      var def = { owner: 'Accounts & Finance Administrator', admin: 'Admin', reception: 'Reception' };
+      return '<div class="group-head">Issued by</div><div class="group">' + st.filter(function (u) { return u.status === 'active'; }).map(function (u) {
+        return '<label class="cell"><span>' + esc(firstName(u.name)) + '</span><input data-rctitle="' + esc(u.username) + '" type="text" maxlength="60" placeholder="' + esc(def[u.role] || 'Staff') + '" value="' + esc(titles[u.username] || '') + '"></label>';
+      }).join('') + '</div><p class="group-foot">Printed as “Name (Title)” on receipts they make. Blank = the grey default. Receipts dated before June 1, 2026 always say Navneet (Admissions Officer).</p>' +
+        '<div class="group-head">Outside people</div><div class="group"><label class="cell"><span>Last RC number</span><input id="rc-rclast" type="text" autocapitalize="characters" value="' + esc(s.receipt_rc_last || '') + '" placeholder="RC260001"></label></div>' +
+        '<p class="group-foot">People who aren’t students get RC numbers. If you made some outside the app, enter the last one and the app carries on after it.</p>' +
+        '<p id="rcs-error" class="error" hidden></p><button class="btn primary block" data-act="rc-settings-save">Save</button>';
+    },
+    after: function (c) {
+      if (c.params.loaded) return; c.params.loaded = true;
+      Promise.all([sapi('getSettings'), sapi('adminStaffList')]).then(function (r) { state.settings = r[0]; state.rcStaff = r[1].staff; if (current().page === 'receiptSettings') rerender(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+    }
+  };
+  function rcSettingsSave(btn) {
+    var titles = {}; Array.prototype.forEach.call(document.querySelectorAll('[data-rctitle]'), function (el) { if (el.value.trim()) titles[el.dataset.rctitle] = el.value.trim(); });
+    var rc = $('rc-rclast').value.trim().toUpperCase();
+    if (rc && !/^RC\d{6,8}$/.test(rc)) return err('rcs-error', 'The last RC number looks like RC260001.');
+    err('rcs-error', ''); btn.disabled = true;
+    sapi('saveSettings', [{ receipt_titles: JSON.stringify(titles), receipt_rc_last: rc }]).then(function (s) { state.settings = s; toast('Saved'); back(); })
+      .catch(function (e) { if (!e.signedOut) err('rcs-error', e.message); }).then(function () { btn.disabled = false; });
+  }
+
   function agentLabel(a) { a = String(a || '').trim(); return !a || /^dir/i.test(a) ? 'Direct' : a; }
   function cashEditAct(id) {
     var x = state.cashDetail; if (!x) return;
@@ -1689,6 +1993,16 @@
         case 'cb-out': return cashBookOutAct();
         case 'cb-close': return cashBookCloseAct();
         case 'cb-remove': return cashBookRemoveAct(b.dataset.id);
+        case 'rc-open': return openReceipt(b.dataset.no, b.dataset.sid, b);
+        case 'rc-student': return go('receiptStudent', { sid: b.dataset.sid });
+        case 'rc-view': state.rcView = null; return go('receiptView', { no: b.dataset.no, sid: b.dataset.sid || '' });
+        case 'rc-print': return state.rcView && offerReceipts([state.rcView]);
+        case 'rc-void': return rcVoidAct();
+        case 'rc-make': return rcMakeAct(b);
+        case 'rc-make-one': return rcMakeOneAct(b);
+        case 'rc-selall': { var bn = b.dataset.batch, tt = state.rcTodo; if (!tt) return; var ss2 = tt.students.filter(function (s) { return (s.batch || 'No batch') === bn && rcSelectable(s); }); var allOn = ss2.every(function (s) { return state.rcSel[s.studentId]; }); ss2.forEach(function (s) { state.rcSel[s.studentId] = !allOn; }); if ($('rc-todo')) $('rc-todo').innerHTML = rcTodoHtml(); return rcMakeBar(); }
+        case 'refresh-rc': state.rcTodo = null; return loadRcTodo(true);
+        case 'rc-settings-save': return rcSettingsSave(b);
         case 'install': return install();
         case 'revoke':
           return sapi('staffRevokeSession', [b.dataset.id]).then(function (r) { state.me = r; state.loadedAt.me = Date.now(); rerender(); toast('That phone is signed out'); }).catch(function (e3) { if (!e3.signedOut) toast(e3.message); });
