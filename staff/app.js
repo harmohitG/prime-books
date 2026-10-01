@@ -104,6 +104,7 @@
     box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4-8.5 4-8.5-4z"/><path d="M3.5 7.5v9l8.5 4 8.5-4v-9"/><path d="M12 11.5v9"/></svg>',
     cash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
     bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
+    qr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>',
     receipt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h12v19l-2.4-1.6-2.4 1.6-1.2-.8-1.2.8-2.4-1.6L6 21.5z"/><path d="M9 7.5h6M9 11h6M9 14.5h4"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/></svg>'
   };
@@ -283,6 +284,7 @@
     if (can('cash_take')) t.push({ key: 'cash', label: 'Cash', icon: ICON.cash });
     if (can('receipts')) t.push({ key: 'receipts', label: 'Receipts', icon: ICON.receipt });
     if (can('stock_view')) t.push({ key: 'stock', label: 'Stock', icon: ICON.stock });
+    t.push({ key: 'qr', label: 'QR codes', icon: ICON.qr });
     if (can('admin')) t.push({ key: 'admin', label: 'Admin', icon: ICON.admin });
     t.push({ key: 'me', label: 'Me', icon: ICON.me });
     return t;
@@ -298,7 +300,7 @@
   function lock() {
     if (!state.unlocked) return;
     if (state.token) api('staffLock', [state.token]).catch(function () {});
-    state.unlocked = false; stopPolling(); closeDialog(); closeDrawer(); var fs = $('sigfs'); if (fs) { fs.remove(); document.body.classList.remove('sigfs-on'); }
+    state.unlocked = false; stopPolling(); closeDialog(); closeDrawer(); var fs = $('sigfs'); if (fs) { fs.remove(); document.body.classList.remove('sigfs-on'); } var qf0 = $('qrfs'); if (qf0) qf0.remove();
     state.orders = []; state.ordersAt = null; state.staff = null; state.activity = null; state.me = null; state.settings = null; state.revealPin = {}; state.loadedAt = {};
     showPin('unlock');
   }
@@ -369,6 +371,7 @@
       if (can('cash_take')) { apps.push(['cash', 'Cash', ICON.cash, 'green', 0]); apps.push(['@cashbook', 'Cash book', ICON.sheet, 'teal', 0]); }
       if (can('receipts')) apps.push(['receipts', 'Receipts', ICON.receipt, 'rose', 0]);
       if (can('stock_view')) apps.push(['stock', 'Stock', ICON.stock, 'amber', lowN]);
+      apps.push(['qr', 'QR codes', ICON.qr, 'blue', 0]);
       if (can('admin')) apps.push(['admin', 'Admin', ICON.admin, 'violet', 0]);
       apps.push(['me', 'Me', ICON.me, 'grey', 0]);
       h += '<div class="group-head">Apps</div><div class="apps">' + apps.map(function (a) {
@@ -1451,6 +1454,37 @@
       .catch(function (e) { if (!e.signedOut) err('rcs-error', e.message); }).then(function () { btn.disabled = false; });
   }
 
+  /* =================================================================== QR codes (students: everyone; staff app: owner + admins) */
+  var QR = {
+    students: { img: 'qr-students.svg', url: 'https://harmohitg.github.io/prime-books/', title: 'Students: order books', sub: 'Students scan this to order their books and see their order.' },
+    staff: { img: 'qr-staff.svg', url: 'https://harmohitg.github.io/prime-books/staff/', title: 'Staff app', sub: 'Only for staff you’ve added in Admin. They scan it, add it to their Home Screen and sign in.' }
+  };
+  function qrCard(k) {
+    var q = QR[k];
+    return '<div class="qr-card"><div class="qr-title">' + esc(q.title) + '</div><button class="qr-img" data-act="qr-full" data-qr="' + k + '" aria-label="Show ' + esc(q.title) + ' full screen"><img src="' + q.img + '" alt="QR code: ' + esc(q.url) + '"></button>' +
+      '<div class="qr-url">' + esc(q.url.replace(/^https:\/\//, '')) + '</div><p class="qr-sub">' + esc(q.sub) + '</p>' +
+      '<div class="qr-btns"><button class="btn primary" data-act="qr-full" data-qr="' + k + '">' + ICON.expand + 'Full screen</button><button class="btn" data-act="qr-share" data-qr="' + k + '">Share link</button></div></div>';
+  }
+  PAGES.qr = {
+    title: 'QR codes', root: true,
+    html: function () {
+      var h = '<div class="large-row"><h1 class="large">QR codes</h1></div>' + qrCard('students');
+      if (can('admin')) h += '<div class="group-head">For new staff</div>' + qrCard('staff');
+      return h;
+    }
+  };
+  function qrFull(k) {
+    var q = QR[k]; if (!q) return;
+    var el = document.createElement('div'); el.id = 'qrfs'; el.className = 'qrfs';
+    el.innerHTML = '<div class="qrfs-title">' + esc(q.title) + '</div><img src="' + q.img + '" alt=""><div class="qrfs-url">' + esc(q.url.replace(/^https:\/\//, '')) + '</div><button class="btn block" data-act="qr-close">Done</button>';
+    el.addEventListener('click', function () { el.remove(); });   // Done, or a tap anywhere
+    document.body.appendChild(el);
+  }
+  function qrShare(k) {
+    var q = QR[k]; if (!q) return;
+    if (navigator.share) return navigator.share({ title: q.title, url: q.url }).catch(function () {});
+    if (navigator.clipboard) navigator.clipboard.writeText(q.url).then(function () { toast('Link copied'); });
+  }
   function agentLabel(a) { a = String(a || '').trim(); return !a || /^dir/i.test(a) ? 'Direct' : a; }
   function cashEditAct(id) {
     var x = state.cashDetail; if (!x) return;
@@ -2087,6 +2121,9 @@
         case 'cb-close': return cashBookCloseAct();
         case 'cb-remove': return cashBookRemoveAct(b.dataset.id);
         case 'cash-pdf': if (b.closest('#dlg')) closeDialog(); return cashPdfAct(b.dataset.cash, b.closest('#dlg') ? null : b);
+        case 'qr-full': return qrFull(b.dataset.qr);
+        case 'qr-close': { var qf = $('qrfs'); if (qf) qf.remove(); return; }
+        case 'qr-share': return qrShare(b.dataset.qr);
         case 'rc-open': return openReceipt(b.dataset.no, b.dataset.sid, b);
         case 'rc-student': return go('receiptStudent', { sid: b.dataset.sid });
         case 'rc-view': state.rcView = null; return go('receiptView', { no: b.dataset.no, sid: b.dataset.sid || '' });

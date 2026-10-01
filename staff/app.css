@@ -412,3 +412,18 @@ select#rc-prog { font: inherit; font-size: 15px; padding: 6px 8px; border-radius
 .rc-box .link { font-size: 14px; padding: 4px 6px; white-space: nowrap; }
 ol.steps { margin: 4px 0 18px; padding: 12px 16px 12px 34px; background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow); font-size: 15px; line-height: 1.45; }
 ol.steps li { margin: 4px 0; }
+
+/* ---------- QR codes ---------- */
+.qr-card { background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow); padding: 18px 16px 16px; text-align: center; }
+.qr-title { font-size: 19px; font-weight: 700; margin-bottom: 12px; }
+.qr-img { display: block; margin: 0 auto; background: #fff; border-radius: 14px; padding: 10px; width: min(72vw, 300px); }
+.qr-img img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.qr-url { margin-top: 10px; font-size: 14px; color: var(--muted); word-break: break-all; }
+.qr-sub { margin: 6px 4px 14px; font-size: 14px; color: var(--muted); }
+.qr-btns { display: flex; gap: 10px; justify-content: center; }
+.qr-btns .btn { flex: 1; }
+.qrfs { position: fixed; inset: 0; z-index: 200; background: #fff; color: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+.qrfs img { width: min(86vw, 70vh); height: auto; image-rendering: pixelated; }
+.qrfs-title { font-size: 24px; font-weight: 800; text-align: center; }
+.qrfs-url { font-size: 15px; color: #555; }
+.qrfs .btn { max-width: 320px; }
