@@ -17,6 +17,7 @@
     timer: null, hiddenAt: 0, busy: false, deferredInstall: null, pin: { mode: 'unlock', digits: '', first: '', busy: false }, loadedAt: {},
     push: null, os: null, pushState: 'off', pendingOrder: null,
     cash: null, cashRange: { key: 'today' }, cashRep: null, cashDetail: null, cashToday: null, cashMine: null, cashItems: null, cashBook: null, practice: false,
+    gpa: { batches: null, view: null, sheet: '', pend: {} },
     rcTodo: null, rcSel: {}, rcOpen: {}, rcStudent: null, rcPick: {}, rcProgram: '', rcView: null, rcQ: ''
   };
   /** true (and marks it) if `key` hasn't been loaded in the last `ms`: stops pages that re-render after loading from loading again. */
@@ -39,6 +40,8 @@
     if (sameDay(x, y)) return 'Yesterday ' + timeOf(iso);
     return x.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) + ', ' + timeOf(iso);
   }
+  var MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function niceYmd(ymd) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || '')); return m ? MON3[Number(m[2]) - 1] + ' ' + Number(m[3]) + (m[1] !== String(new Date().getFullYear()) ? ', ' + m[1] : '') : ''; }
   function ago(iso) {
     var x = d(iso); if (!x) return 'Never';
     var s = Math.round((Date.now() - x.getTime()) / 1000);
@@ -104,6 +107,7 @@
     box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4-8.5 4-8.5-4z"/><path d="M3.5 7.5v9l8.5 4 8.5-4v-9"/><path d="M12 11.5v9"/></svg>',
     cash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
     bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
+    gpa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="m9 10 2 2 4-4"/></svg>',
     qr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>',
     receipt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h12v19l-2.4-1.6-2.4 1.6-1.2-.8-1.2.8-2.4-1.6L6 21.5z"/><path d="M9 7.5h6M9 11h6M9 14.5h4"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/></svg>'
@@ -284,7 +288,8 @@
     if (can('cash_take')) t.push({ key: 'cash', label: 'Cash', icon: ICON.cash });
     if (can('receipts')) t.push({ key: 'receipts', label: 'Receipts', icon: ICON.receipt });
     if (can('stock_view')) t.push({ key: 'stock', label: 'Stock', icon: ICON.stock });
-    t.push({ key: 'qr', label: 'QR codes', icon: ICON.qr });
+    if (can('gpa')) t.push({ key: 'gpa', label: 'GPA books', icon: ICON.gpa });
+    if (can('qr')) t.push({ key: 'qr', label: 'QR codes', icon: ICON.qr });
     if (can('admin')) t.push({ key: 'admin', label: 'Admin', icon: ICON.admin });
     t.push({ key: 'me', label: 'Me', icon: ICON.me });
     return t;
@@ -306,8 +311,8 @@
   }
   function current() { return state.stack.length ? state.stack[state.stack.length - 1] : { page: state.tab }; }
   function go(page, params) { state.stack.push({ page: page, params: params || {} }); render(); window.scrollTo(0, 0); }
-  function back() { state.stack.pop(); render(); window.scrollTo(0, 0); }
-  function setTab(t) { closeDrawer(); if (t === state.tab && !state.stack.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; } state.tab = t; set(LS.tab, t); state.stack = []; render(); window.scrollTo(0, 0); }
+  function back() { if (gpaGuard(back)) return; state.stack.pop(); render(); window.scrollTo(0, 0); }
+  function setTab(t) { if (gpaGuard(function () { setTab(t); })) return; closeDrawer(); if (t === state.tab && !state.stack.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; } state.tab = t; set(LS.tab, t); state.stack = []; render(); window.scrollTo(0, 0); }
   /* the side menu (all sections), opened with the menu button at the top left */
   function openDrawer() { renderTabbar(); var d = $('drawer'); if (!d) return; d.hidden = false; requestAnimationFrame(function () { d.classList.add('open'); }); }
   function closeDrawer() { var d = $('drawer'); if (!d || d.hidden) return; d.classList.remove('open'); setTimeout(function () { if (!d.classList.contains('open')) d.hidden = true; }, 220); }
@@ -371,7 +376,8 @@
       if (can('cash_take')) { apps.push(['cash', 'Cash', ICON.cash, 'green', 0]); apps.push(['@cashbook', 'Cash book', ICON.sheet, 'teal', 0]); }
       if (can('receipts')) apps.push(['receipts', 'Receipts', ICON.receipt, 'rose', 0]);
       if (can('stock_view')) apps.push(['stock', 'Stock', ICON.stock, 'amber', lowN]);
-      apps.push(['qr', 'QR codes', ICON.qr, 'blue', 0]);
+      if (can('gpa')) apps.push(['gpa', 'GPA books', ICON.gpa, 'teal', 0]);
+      if (can('qr')) apps.push(['qr', 'QR codes', ICON.qr, 'blue', 0]);
       if (can('admin')) apps.push(['admin', 'Admin', ICON.admin, 'violet', 0]);
       apps.push(['me', 'Me', ICON.me, 'grey', 0]);
       h += '<div class="group-head">Apps</div><div class="apps">' + apps.map(function (a) {
@@ -627,9 +633,13 @@
   function tileHtml(i) {
     var cls = !i.tracked ? ' untracked' : i.low ? ' low' : '';
     var stateChip = !i.tracked ? '<span class="t-state none">Not counted yet</span>' : i.low ? '<span class="t-state low">Low</span>' : '<span class="t-state ok">OK</span>';
-    var h = '<div class="tile' + cls + '"><div class="t-name">' + esc(i.name) + '</div><div class="t-num">' + (i.tracked ? i.onHand : '–') + '</div>' +
+    if (i.tracked && i.order) stateChip = '<span class="t-state ' + (i.late ? 'low' : 'ordered') + '">' + (i.late ? 'Not arrived' : 'Ordered') + '</span>';
+    var h = '<div class="tile' + cls + '" data-tile="' + i.key + '"><div class="t-name">' + esc(i.full || i.name) + '</div>' + (i.note ? '<div class="t-note">' + esc(i.note) + '</div>' : '') + '<div class="t-num">' + (i.tracked ? i.onHand : '–') + '</div>' +
       '<div class="t-sub">' + (can('stock_edit') ? '<button class="alert-at" data-act="stock-threshold" data-item="' + i.key + '">Alert at ' + i.threshold + '</button>' : '<span>Alert at ' + i.threshold + '</span>') + stateChip + '</div>';
-    if (can('stock_edit')) h += '<div class="t-actions"><button class="btn" data-act="stock-receive" data-item="' + i.key + '">Receive</button><button class="btn" data-act="stock-count" data-item="' + i.key + '">Count</button></div>';
+    if (i.order) h += '<div class="t-order' + (i.late ? ' late' : '') + '">Ordered <b>' + i.order.qty + '</b> on ' + esc(niceYmd(i.order.on)) + (i.order.days > 0 ? ' · ' + i.order.days + (i.order.days === 1 ? ' day' : ' days') + ' ago' : ' · today') +
+      (can('stock_edit') ? ' <button class="link" data-act="stock-orderclear" data-item="' + i.key + '">Cancel order</button>' : '') + '</div>';
+    if (can('stock_edit')) h += '<div class="t-actions"><button class="btn" data-act="stock-receive" data-item="' + i.key + '">Receive</button><button class="btn" data-act="stock-count" data-item="' + i.key + '">Count</button>' +
+      (i.order ? '' : '<button class="btn' + (i.low ? ' primary' : '') + '" data-act="stock-order" data-item="' + i.key + '">Ordered</button>') + '</div>';
     return h + '</div>';
   }
   function logRowHtml(l) {
@@ -644,7 +654,7 @@
     $('stock-body').innerHTML = !st ? loadingHtml() : lowBanner() +
       (untracked && can('stock_edit') ? '<div class="banner amber">' + ICON.box + '<span class="grow">Tap <b>Count</b> on each book to enter what’s on the shelf. Tracking and alerts start after that.</span></div>' : '') +
       '<div class="stock-grid">' + st.items.map(tileHtml).join('') + '</div>' +
-      '<p class="group-foot">Each pickup takes one of each book in the order (the palliative bundle takes a textbook and a workbook). You get one email when a book reaches its alert level.</p>' +
+      '<p class="group-foot">Each pickup takes one of each book in the order (the palliative bundle takes a textbook and a workbook). GPA books come off when they’re ticked in the GPA tab. When a book reaches its alert level, the owner and admins get a notification every hour (9 am–6 pm) until someone taps <b>Ordered</b>; if the order hasn’t arrived 7 days later, a daily reminder. <b>Receive</b> closes the order.</p>' +
       '<div class="group-head">Recent changes</div>' +
       (state.stockLogRows === null ? loadingHtml() : state.stockLogRows.length ? '<div class="group">' + state.stockLogRows.slice(0, 40).map(logRowHtml).join('') + '</div>' : '<p class="group-foot">No changes yet.</p>');
   }
@@ -662,21 +672,163 @@
   function stockItem(key) { return state.stock ? state.stock.items.filter(function (i) { return i.key === key; })[0] : null; }
   function stockAct(act, key) {
     var i = stockItem(key); if (!i) return;
-    var mode = act.replace('stock-', ''), cfg = {
+    var mode = act.replace('stock-', '');
+    if (mode === 'orderclear') {
+      return dialog({ title: 'Cancel the order?', html: 'The order of ' + i.order.qty + ' on ' + esc(niceYmd(i.order.on)) + ' is removed. If ' + esc(i.name) + ' is still low, the hourly reminders start again.', ok: 'Cancel order', cancel: 'Keep it', destructive: true,
+        inputs: [{ key: 'note', placeholder: 'Why? (optional)', maxlength: 120 }] }).then(function (r) {
+        if (!r) return;
+        sapi('stockAdjust', [key, { mode: 'order_clear', note: r.note || '' }]).then(function (st) { state.stock = st; toast('Order cancelled'); return refreshStockQuiet(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+      });
+    }
+    var cfg = {
       receive: { title: 'Receive ' + i.name, html: 'How many arrived?' + (i.tracked ? ' You have ' + i.onHand + ' now.' : ''), ok: 'Add', inputs: [{ key: 'qty', type: 'number', placeholder: 'Number of books' }, { key: 'note', placeholder: 'Note (optional), e.g. supplier invoice #' , maxlength: 120 }] },
       count: { title: 'Count ' + i.name, html: 'How many are on the shelf right now?' + (i.tracked ? ' The app thinks ' + i.onHand + '.' : ''), ok: 'Save count', inputs: [{ key: 'qty', type: 'number', placeholder: 'Books on the shelf', value: i.tracked ? String(i.onHand) : '' }, { key: 'note', placeholder: 'Note (optional)', maxlength: 120 }] },
-      threshold: { title: 'Alert level', html: 'Email me when ' + esc(i.name) + ' drops to this number or below.', ok: 'Save', inputs: [{ key: 'qty', type: 'number', value: String(i.threshold) }] }
+      threshold: { title: 'Alert level', html: 'Remind the owner and admins when ' + esc(i.name) + ' drops to this number or below.', ok: 'Save', inputs: [{ key: 'qty', type: 'number', value: String(i.threshold) }] },
+      order: { title: 'Ordered ' + i.name, html: 'Enter the order once it’s placed. The hourly reminders stop; they come back daily if it hasn’t arrived in 7 days. Tap <b>Receive</b> when the books come.', ok: 'Save order',
+        inputs: [{ key: 'qty', type: 'number', placeholder: 'How many you ordered' }, { key: 'date', type: 'date', value: todayStr(), max: todayStr(), label: 'Date ordered' }, { key: 'note', placeholder: 'Note (optional), e.g. supplier', maxlength: 120 }] }
     }[mode];
-    cfg.validate = function (v) { var n = Number(v.qty); if (v.qty === '' || !isFinite(n) || n < 0 || Math.floor(n) !== n) return 'Enter a whole number.'; if (mode === 'receive' && n === 0) return 'Enter how many arrived.'; if (n > 100000) return 'That number looks too big.'; return ''; };
+    if (!cfg) return;
+    cfg.validate = function (v) {
+      var n = Number(v.qty); if (v.qty === '' || !isFinite(n) || n < 0 || Math.floor(n) !== n) return 'Enter a whole number.';
+      if (mode === 'receive' && n === 0) return 'Enter how many arrived.'; if (mode === 'order' && n === 0) return 'Enter how many you ordered.'; if (n > 100000) return 'That number looks too big.';
+      if (mode === 'order' && !/^\d{4}-\d{2}-\d{2}$/.test(v.date || '')) return 'Pick the date you ordered.';
+      if (mode === 'order' && v.date > todayStr()) return 'The order date can’t be in the future.';
+      return '';
+    };
     dialog(cfg).then(function (r) {
       if (!r) return;
       state.busy = true;
-      sapi('stockAdjust', [key, { mode: mode, qty: Number(r.qty), note: r.note || '' }]).then(function (st) {
-        state.stock = st; toast(mode === 'receive' ? 'Added ' + r.qty + ' · ' + i.name : mode === 'count' ? i.name + ': ' + r.qty + ' on the shelf' : 'Alert level saved');
+      sapi('stockAdjust', [key, { mode: mode, qty: Number(r.qty), note: r.note || '', date: r.date || '' }]).then(function (st) {
+        state.stock = st; toast(mode === 'receive' ? 'Added ' + r.qty + ' · ' + i.name : mode === 'count' ? i.name + ': ' + r.qty + ' on the shelf' : mode === 'order' ? 'Order saved · reminders stopped' : 'Alert level saved');
         buzz(20); return refreshStockQuiet();
       }).catch(function (e) { if (!e.signedOut) toast(e.message); }).then(function () { state.busy = false; });
     });
   }
+
+  /* =================================================================== GPA books (module 9) */
+  /** Unsaved ticks, kept per batch: leaving, locking or opening another batch never throws them away unasked. */
+  function gpaPend(sheet) { var g = state.gpa, k = sheet === undefined ? g.sheet : sheet; return g.pend[k] || (g.pend[k] = { give: {}, undo: {}, date: '' }); }
+  function gpaCount(p) { return p ? Object.keys(p.give).length + Object.keys(p.undo).length : 0; }
+  function gpaDirty() { return gpaCount(state.gpa.pend[state.gpa.sheet]); }
+  /** Leaving a batch with unsaved ticks: save or throw them away, never lose them silently. Returns true if it took over. */
+  function gpaGuard(then) {
+    if (current().page !== 'gpaBatch' || !gpaDirty()) return false;
+    closeDrawer();
+    var n = gpaDirty();
+    dialog({ title: 'Save the ticks first?', html: n + (n === 1 ? ' change isn’t' : ' changes aren’t') + ' saved yet for ' + esc(state.gpa.view ? state.gpa.view.title : 'this batch') + '.', ok: 'Save', cancel: 'Don’t save', strict: true })
+      .then(function (r) {
+        if (r) return gpaSaveAct().then(function (ok) { if (ok) then(); });
+        delete state.gpa.pend[state.gpa.sheet]; then();
+      });
+    return true;
+  }
+  function gpaStockLine(st) {
+    if (!st) return '';
+    if (!st.tracked) return '<div class="banner amber">' + ICON.box + '<span class="grow">GPA books aren’t counted yet, so ticks don’t change stock. ' + (can('stock_edit') ? 'Count them in <b>Stock</b>.' : 'Ask an admin to count them.') + '</span></div>';
+    return '<p class="gpa-stock' + (st.low ? ' low' : '') + '">' + ICON.box + '<span><b>' + st.onHand + '</b> GPA books on the shelf' + (st.low ? ' · low' : '') + '</span></p>';
+  }
+  PAGES.gpa = {
+    title: 'GPA books', root: true,
+    right: function () { return navBtn('gpa-refresh', ICON.refresh, 'Refresh'); },
+    html: function () {
+      var b = state.gpa.batches, h = '<div class="large-row"><h1 class="large">GPA books</h1></div><p class="lead">Module 9 · free for students. Pick the batch doing GPA, tick who got a book, save. Students from another batch: open their batch and tick them there.</p>';
+      if (!b) return h + loadingHtml();
+      h += gpaStockLine(b.stock);
+      if (!b.batches.length) return h + '<p class="group-foot">No batches in the workbook yet.</p>';
+      return h + '<div class="group">' + b.batches.map(function (x) {
+        var all = x.students && x.issued >= x.students, un = gpaCount(state.gpa.pend[x.sheet]);
+        return '<button class="row" data-act="gpa-open" data-sheet="' + esc(x.sheet) + '"><span class="grow"><span class="title">' + esc(x.title) + '</span><span class="sub">' + x.issued + ' of ' + x.students + ' have a book' + (x.start ? ' · started ' + esc(niceYmd(x.start)) : '') + '</span></span>' +
+          (un ? '<span class="t-state low">' + un + ' not saved</span>' : all ? '<span class="t-state ok">All done</span>' : '') + '<span class="chev">' + ICON.chev + '</span></button>';
+      }).join('') + '</div>';
+    },
+    after: function () { if (!state.gpa.batches || Date.now() - (state.gpa.batchesAt || 0) > 30000) loadGpaBatches(); }
+  };
+  function loadGpaBatches() {
+    return sapi('gpaBatches').then(function (r) { state.gpa.batches = r; state.gpa.batchesAt = Date.now(); if (current().page === 'gpa') rerender(); })
+      .catch(function (e) { if (!e.signedOut) toast(e.message); });
+  }
+  PAGES.gpaBatch = {
+    title: 'Batch',
+    html: function (c) {
+      var g = state.gpa, v = g.view;
+      if (!v || v.sheet !== c.params.sheet) return loadingHtml();
+      var P = gpaPend();
+      var have = v.students.filter(function (s) { return s.issues.length; }).length;
+      var h = '<h1 class="large gpa-title">' + esc(v.title) + '</h1><p class="lead">' + have + ' of ' + v.students.length + ' have a GPA book.</p>' + gpaStockLine(v.stock) +
+        '<div class="group"><label class="row gpa-date"><span class="grow"><span class="title">Date given</span><span class="sub">Used for the students you tick now</span></span><input type="date" id="gpa-date" max="' + esc(v.today) + '" value="' + esc(P.date || v.today) + '"></label></div>' +
+        '<div class="group-head">Students</div><div class="group" id="gpa-list">' + v.students.map(gpaRowHtml).join('') + '</div>' +
+        '<p class="group-foot">Tick a student to give them a book; untick a saved one to take it back (the book goes back on the shelf). Every change is logged with your name.</p>' +
+        '<div id="gpa-bar" class="rc-make"' + (gpaDirty() ? '' : ' hidden') + '>' + gpaBarHtml() + '</div>';
+      return h;
+    },
+    after: function (c) { if (!state.gpa.view || state.gpa.view.sheet !== c.params.sheet) loadGpaBatch(c.params.sheet); }
+  };
+  function gpaRowHtml(s) {
+    var g = state.gpa, P = gpaPend(), last = s.issues[s.issues.length - 1];
+    if (!last) {
+      return '<label class="row"><input type="checkbox" data-gpa-give="' + esc(s.key) + '"' + (P.give[s.key] ? ' checked' : '') + '><span class="grow"><span class="title">' + esc(s.name) + '</span><span class="sub">' + (P.give[s.key] ? '<b class="gpa-new">New · ' + esc(niceYmd(P.date || g.view.today)) + ' · not saved</b>' : esc(s.studentId || 'No student ID')) + '</span></span></label>';
+    }
+    var back = !!P.undo[last.id], other = last.batch && last.batch !== g.view.sheet;
+    var sub = back ? '<b class="gpa-back">Taken back when you save</b>' : 'Got it ' + esc(niceYmd(last.on)) + ' · ' + esc(last.by) + (other ? ' · with ' + esc(last.batch) : '') + (last.kind === 'replacement' ? ' · replacement: ' + esc(last.reason) : '') + (s.issues.length > 1 ? ' · ' + s.issues.length + ' books' : '');
+    return '<div class="row gpa-had"><label class="gpa-chk"><input type="checkbox" data-gpa-undo="' + esc(last.id) + '"' + (back ? '' : ' checked') + ' aria-label="' + esc(s.name) + ' has a book"></label><span class="grow"><span class="title">' + esc(s.name) + '</span><span class="sub">' + sub + '</span></span>' +
+      (back ? '' : '<button class="btn small" data-act="gpa-redate" data-id="' + esc(last.id) + '">Date</button><button class="btn small" data-act="gpa-replace" data-key="' + esc(s.key) + '">Another</button>') + '</div>';
+  }
+  function gpaBarHtml() {
+    var P = gpaPend(), a = Object.keys(P.give).length, b = Object.keys(P.undo).length;
+    var parts = []; if (a) parts.push(a + (a === 1 ? ' book given' : ' books given')); if (b) parts.push(b + ' taken back');
+    return '<button class="btn primary block" data-act="gpa-save">' + ICON.check + 'Save · ' + parts.join(', ') + '</button>';
+  }
+  function gpaRefreshBits() {
+    var bar = $('gpa-bar'); if (bar) { bar.hidden = !gpaDirty(); bar.innerHTML = gpaBarHtml(); }
+    var y = window.scrollY, list = $('gpa-list'); if (list && state.gpa.view) list.innerHTML = state.gpa.view.students.map(gpaRowHtml).join(''); window.scrollTo(0, y);
+  }
+  function loadGpaBatch(sheet) {
+    return sapi('gpaBatch', [sheet]).then(function (v) {
+      var g = state.gpa, P = gpaPend(sheet);
+      g.sheet = sheet; g.view = v;
+      // drop ticks the server already has (saved from another phone meanwhile)
+      v.students.forEach(function (st) { if (st.issues.length) delete P.give[st.key]; });
+      Object.keys(P.undo).forEach(function (id) { if (!v.students.some(function (st) { return st.issues.some(function (i) { return i.id === id; }); })) delete P.undo[id]; });
+      if (current().page === 'gpaBatch') rerender();
+    }).catch(function (e) { if (!e.signedOut) toast(e.message); });
+  }
+  function gpaOpen(sheet) {
+    var g = state.gpa;
+    if (g.view && g.view.sheet !== sheet) g.view = null;
+    g.sheet = sheet;
+    go('gpaBatch', { sheet: sheet });
+  }
+  /** Resolves true when saved. */
+  function gpaSaveAct() {
+    var g = state.gpa, sheet = g.sheet, P = gpaPend(sheet), give = Object.keys(P.give), undo = Object.keys(P.undo);
+    if (!give.length && !undo.length) return Promise.resolve(true);
+    var date = ($('gpa-date') && $('gpa-date').value) || P.date || (g.view && g.view.today) || '';
+    if (give.length && !/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Pick the date the books were given.'); return Promise.resolve(false); }
+    var btn = document.querySelector('[data-act="gpa-save"]'); if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>'; }
+    state.busy = true;
+    return sapi('gpaSave', [{ sheet: sheet, date: date, give: give, undo: undo }]).then(function (v) {
+      g.view = v; delete g.pend[sheet]; g.batches = null; buzz(20);
+      toast((give.length ? give.length + (give.length === 1 ? ' book' : ' books') + ' saved' : '') + (give.length && undo.length ? ', ' : '') + (undo.length ? undo.length + ' taken back' : ''));
+      state.stock = null; if (current().page === 'gpaBatch') rerender();
+      return true;
+    }).catch(function (e) { if (!e.signedOut) dialog({ title: 'Not saved', html: esc(e.message) + '<br>Nothing was saved. Your ticks are still here.', ok: 'OK', noCancel: true }); gpaRefreshBits(); return false; })
+      .then(function (ok) { state.busy = false; return ok; });
+  }
+  function gpaRedateAct(id) {
+    var g = state.gpa, s = g.view && g.view.students.filter(function (x) { return x.issues.some(function (i) { return i.id === id; }); })[0]; if (!s) return;
+    var iss = s.issues.filter(function (i) { return i.id === id; })[0];
+    dialog({ title: 'Date for ' + s.name, html: 'Fixes the date on the book already recorded. Stock doesn’t change.', ok: 'Save', inputs: [{ key: 'date', type: 'date', value: iss.on, max: g.view.today, label: 'Date given' }],
+      validate: function (v) { return /^\d{4}-\d{2}-\d{2}$/.test(v.date) ? (v.date > g.view.today ? 'Can’t be in the future.' : '') : 'Pick a date.'; } })
+      .then(function (r) { if (!r || r.date === iss.on) return; sapi('gpaSetDate', [{ sheet: g.sheet, id: id, date: r.date }]).then(function (v) { g.view = v; rerender(); toast('Date changed'); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+  }
+  function gpaReplaceAct(key) {
+    var g = state.gpa, s = g.view && g.view.students.filter(function (x) { return x.key === key; })[0]; if (!s) return;
+    dialog({ title: 'Another book for ' + s.name + '?', html: 'Only if they need a second one (lost, damaged). One more comes off stock.', ok: 'Give another',
+      inputs: [{ key: 'reason', placeholder: 'Why? (required), e.g. lost it', maxlength: 120 }, { key: 'date', type: 'date', value: g.view.today, max: g.view.today, label: 'Date given' }],
+      validate: function (v) { return v.reason.length < 3 ? 'Say why they need another.' : /^\d{4}-\d{2}-\d{2}$/.test(v.date) ? '' : 'Pick a date.'; } })
+      .then(function (r) { if (!r) return; sapi('gpaReplace', [{ sheet: g.sheet, key: key, date: r.date, reason: r.reason }]).then(function (v) { g.view = v; g.batches = null; rerender(); toast('Saved: another book for ' + firstNameOf(s.name)); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+  }
+  window.addEventListener('beforeunload', function (e) { if (Object.keys(state.gpa.pend).some(function (k) { return gpaCount(state.gpa.pend[k]); })) { e.preventDefault(); e.returnValue = ''; } });
 
   /* =================================================================== Cash at the desk */
   function newCashState() { return { email: '', phone: '', name: '', lookup: null, looking: false, orderNo: null, sorrentino: false, palliative: false, matchKey: '', items: {}, tuition: false, tuitionAmt: '', tuitionNote: '', external: false, ovAmount: '', ovReason: '' }; }
@@ -1767,6 +1919,14 @@
         '<div class="row"><span class="grow"><span class="title">Signed in on</span></span><span class="value">' + u.phones + (u.phones === 1 ? ' phone' : ' phones') + '</span></div>' +
         '<div class="row"><span class="grow"><span class="title">Added</span></span><span class="value">' + esc(when(u.createdAt)) + (u.createdBy && u.createdBy !== 'setup' ? ' by ' + esc(u.createdBy) : '') + '</span></div>' +
         '</div>';
+      if (u.tabs && !mine) {
+        h += '<div class="group-head">Tabs ' + esc(firstName(u.name)) + ' can open</div><div class="group">' + u.tabs.map(function (t) {
+          var fixed = !t.canGrant && !t.byRole;
+          var sub = fixed ? 'Comes with the Admin role' : t.custom ? (t.on ? 'Turned on by you' : 'Turned off by you') : (t.on ? 'On for ' : 'Off for ') + esc(u.roleLabel);
+          return '<div class="row"><span class="grow"><span class="title">' + esc(t.label) + '</span><span class="sub">' + sub + '</span></span><label class="switch"><input type="checkbox" data-tabsw="' + t.key + '" data-username="' + esc(u.username) + '"' + (t.on ? ' checked' : '') + (fixed ? ' disabled' : '') + ' aria-label="' + esc(t.label) + '"><span></span></label></div>';
+        }).join('') + (u.tabs.some(function (t) { return t.custom; }) ? '<button class="row accent" data-act="tabs-reset" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Back to what ' + esc(u.roleLabel) + ' gets</span></span></button>' : '') +
+          '</div><p class="group-foot">Book orders and Me are always there. A tab only lets them see and use it; voiding cash, the cash report, settings and managing staff stay with the role. Changes apply the next time their app refreshes.</p>';
+      }
       h += '<div class="group-head">Actions</div><div class="group">' +
         (locked && !mine ? '' : '<button class="row accent" data-act="staff-reset" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Reset password</span><span class="sub">Makes a new password and signs them out of every phone.</span></span></button>');
       if (!mine && !locked) {
@@ -1783,6 +1943,16 @@
     return sapi('adminStaffUpdate', [username, changes]).then(function () { return sapi('adminStaffList'); })
       .then(function (r) { state.staff = r; rerender(); if (msg) toast(msg); })
       .catch(function (e) { if (!e.signedOut) toast(e.message); }).then(function () { state.busy = false; });
+  }
+  function staffTabSwitch(username, key, on) {
+    var tabs = {}; tabs[key] = on;
+    var u = staffByName(username), t = u && u.tabs ? u.tabs.filter(function (x) { return x.key === key; })[0] : null;
+    staffUpdate(username, { tabs: tabs }, (t ? t.label : 'Tab') + (on ? ' on' : ' off') + ' for ' + firstName(u ? u.name : username));
+  }
+  function staffTabsReset(username) {
+    var u = staffByName(username); if (!u || !u.tabs) return;
+    var tabs = {}; u.tabs.forEach(function (t) { if (t.custom) tabs[t.key] = null; });
+    staffUpdate(username, { tabs: tabs }, 'Tabs reset for ' + firstName(u.name));
   }
   function showCredentials(title, name, username, password, intro) {
     var link = location.origin + location.pathname.replace(/index\.html$/, '');
@@ -2024,6 +2194,7 @@
       dlgResolve = resolve;
       var inputs = (o.inputs || []).map(function (f, i) {
         var attrs = ' data-key="' + f.key + '" placeholder="' + esc(f.placeholder || '') + '"' + (f.maxlength ? ' maxlength="' + f.maxlength + '"' : '');
+        if (f.type === 'date') return '<label class="dlg-label">' + esc(f.label || '') + '<input type="date"' + attrs + (f.max ? ' max="' + esc(f.max) + '"' : '') + ' value="' + esc(f.value || '') + '"' + (i === 0 ? ' data-first="1"' : '') + '></label>';
         return f.textarea ? '<textarea rows="3"' + attrs + '>' + esc(f.value || '') + '</textarea>'
           : '<input type="' + (f.type === 'number' ? 'text' : 'text') + '"' + (f.type === 'number' ? ' inputmode="numeric" pattern="[0-9]*"' : '') + attrs + ' value="' + esc(f.value || '') + '"' + (i === 0 ? ' data-first="1"' : '') + '>';
       }).join('');
@@ -2033,7 +2204,7 @@
       $('dlg').hidden = false;
       $('dlg').onclick = function (e) {
         var b = e.target.closest('[data-dlg]');
-        if (!b) { if (e.target === $('dlg') && !o.noCancel) finish(null); return; }
+        if (!b) { if (e.target === $('dlg') && !o.noCancel && !o.strict) finish(null); return; }
         if (b.dataset.dlg === 'cancel') return finish(null);
         var vals = {}; Array.prototype.forEach.call($('dlg').querySelectorAll('[data-key]'), function (el) { vals[el.dataset.key] = el.value.trim(); });
         var problem = o.validate ? o.validate(vals) : '';
@@ -2041,11 +2212,11 @@
         finish(o.inputs ? vals : true);
       };
       $('dlg').onkeydown = function (e) {
-        if (e.key === 'Escape' && !o.noCancel) finish(null);
+        if (e.key === 'Escape' && !o.noCancel && !o.strict) finish(null);
         if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); $('dlg').querySelector('[data-dlg="ok"]').click(); }
       };
       var first = $('dlg').querySelector('[data-first]');
-      if (first) setTimeout(function () { first.focus(); first.select(); }, 60); else setTimeout(function () { $('dlg').querySelector('[data-dlg="ok"]').focus(); }, 30);
+      if (first) setTimeout(function () { first.focus(); if (first.select && first.type !== 'date') first.select(); }, 60); else setTimeout(function () { $('dlg').querySelector('[data-dlg="ok"]').focus(); }, 30);
     });
     function finish(v) { var r = dlgResolve; dlgResolve = null; $('dlg').hidden = true; $('dlg').innerHTML = ''; if (r) r(v); }
   }
@@ -2054,7 +2225,14 @@
   /* =================================================================== events */
   function initMain() {
     $('tabbar').addEventListener('click', function (e) { var b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
-    $('page').addEventListener('change', function (e) { if (e.target.dataset && e.target.dataset.act === 'practice-toggle') practiceToggle(e.target.checked); });
+    $('page').addEventListener('change', function (e) {
+      var t = e.target, ds = t.dataset || {};
+      if (ds.act === 'practice-toggle') return practiceToggle(t.checked);
+      if (ds.gpaGive !== undefined) { var P1 = gpaPend(); if (t.checked) P1.give[ds.gpaGive] = true; else delete P1.give[ds.gpaGive]; return gpaRefreshBits(); }
+      if (ds.gpaUndo !== undefined) { var P2 = gpaPend(); if (!t.checked) P2.undo[ds.gpaUndo] = true; else delete P2.undo[ds.gpaUndo]; return gpaRefreshBits(); }
+      if (t.id === 'gpa-date') { gpaPend().date = t.value; return gpaRefreshBits(); }
+      if (ds.tabsw !== undefined) return staffTabSwitch(ds.username, ds.tabsw, t.checked);
+    });
     $('v-main').addEventListener('click', function (e) {
       var s = e.target.closest('[data-seg]');
       if (s && s.closest('.seg')) { state.seg = s.dataset.seg; set(LS.seg, state.seg); updateOrders(); return; }
@@ -2080,6 +2258,12 @@
         case 'goto-orders': state.seg = b.dataset.seg; set(LS.seg, state.seg); return setTab('orders');
         case 'refresh': return current().page === 'stock' ? refreshStockQuiet().then(function () { toast('Stock updated'); }) : loadOrders(false);
         case 'refresh-admin': return loadAdmin();
+        case 'gpa-refresh': state.gpa.batches = null; rerender(); return loadGpaBatches();
+        case 'gpa-open': return gpaOpen(b.dataset.sheet);
+        case 'gpa-save': return gpaSaveAct();
+        case 'gpa-redate': return gpaRedateAct(b.dataset.id);
+        case 'gpa-replace': return gpaReplaceAct(b.dataset.key);
+        case 'tabs-reset': return staffTabsReset(b.dataset.username);
         case 'refresh-activity': return loadActivity();
         case 'clear-search': state.search = ''; $('search').value = ''; b.remove(); updateOrders(); $('search').focus(); return;
         case 'reread':

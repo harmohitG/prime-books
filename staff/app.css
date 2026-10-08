@@ -209,7 +209,7 @@ button.row:active, a.row:active { background: var(--fill); }
 
 /* ---------- stock ---------- */
 .stock-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-@media (min-width: 560px) { .stock-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 560px) { .stock-grid { grid-template-columns: repeat(2, 1fr); } }
 .tile { background: var(--panel); border-radius: var(--r); padding: 16px; box-shadow: var(--shadow); position: relative; }
 .t-name { font-size: 15px; font-weight: 600; color: var(--muted); }
 .t-num { font-size: 44px; font-weight: 700; letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.05; margin-top: 6px; }
@@ -222,7 +222,28 @@ button.row:active, a.row:active { background: var(--fill); }
 .t-state.low { background: var(--red-soft); color: var(--red); }
 .t-state.none { background: var(--grey-soft); color: var(--muted); }
 .t-actions { display: flex; gap: 8px; margin-top: 14px; }
-.t-actions .btn { flex: 1; min-height: 40px; font-size: 15px; }
+.t-actions .btn { flex: 1; min-height: 40px; font-size: 15px; padding-left: 6px; padding-right: 6px; }
+.t-note { font-size: 12.5px; color: var(--faint); margin-top: 2px; }
+.t-state.ordered { background: var(--blue-soft); color: var(--blue); }
+.t-order { margin-top: 10px; font-size: 13.5px; color: var(--blue); background: var(--blue-soft); border-radius: 9px; padding: 7px 10px; }
+.t-order.late { color: var(--red); background: var(--red-soft); }
+.t-order .link { font-size: 13.5px; margin-left: 4px; }
+.switch input:disabled + span { opacity: .45; }
+
+/* ---------- GPA books ---------- */
+.gpa-title { font-size: 26px; }
+.gpa-stock { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 15px; margin: 4px 4px 14px; }
+.gpa-stock svg { width: 18px; height: 18px; color: var(--faint); }
+.gpa-stock.low { color: var(--red); }
+.row.gpa-date input[type=date] { border: 1px solid var(--sep); border-radius: 9px; padding: 7px 9px; font-size: 16px; background: var(--panel); color: var(--ink); }
+.row.gpa-had { gap: 10px; }
+.row.gpa-had .btn.small { min-height: 32px; padding: 5px 10px; font-size: 13.5px; flex: none; }
+.gpa-chk { display: flex; }
+.gpa-chk input { width: 22px; height: 22px; accent-color: var(--accent); margin: 0; }
+.gpa-new { color: var(--accent-ink); font-weight: 600; }
+.gpa-back { color: var(--red); font-weight: 600; }
+.dlg-label { display: block; margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+.dlg-label input { margin-top: 4px; }
 
 /* ---------- admin ---------- */
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
