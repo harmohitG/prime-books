@@ -372,6 +372,13 @@ body.sigfs-on { overflow: hidden; }
 .home-stat span { color: var(--muted); font-size: 14px; }
 .home-stat.hot b { color: var(--accent); } .home-stat.warn b { color: var(--red); }
 .apps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px 8px; background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow); padding: 18px 8px 14px; }
+.apps.four { grid-template-columns: repeat(4, 1fr); gap: 8px 4px; padding: 16px 6px 12px; }
+.more-apps { margin-top: 12px; }
+.more-apps summary { list-style: none; cursor: pointer; color: var(--accent); font-weight: 600; font-size: 15px; padding: 8px 4px; }
+.more-apps summary::-webkit-details-marker { display: none; }
+.more-apps summary::after { content: ' \25BE'; }
+.more-apps[open] summary::after { content: ' \25B4'; }
+.home-cash { color: var(--muted); font-size: 14.5px; margin: 8px 4px 0; text-align: center; }
 .app { display: flex; flex-direction: column; align-items: center; gap: 7px; }
 .app-ic { width: 60px; height: 60px; border-radius: 15px; display: flex; align-items: center; justify-content: center; color: #fff; position: relative; box-shadow: 0 2px 6px rgba(16,24,40,.12); }
 .app-ic svg { width: 30px; height: 30px; }

@@ -312,7 +312,7 @@
   function current() { return state.stack.length ? state.stack[state.stack.length - 1] : { page: state.tab }; }
   function go(page, params) { state.stack.push({ page: page, params: params || {} }); render(); window.scrollTo(0, 0); }
   function back() { if (gpaGuard(back)) return; state.stack.pop(); render(); window.scrollTo(0, 0); }
-  function setTab(t) { if (gpaGuard(function () { setTab(t); })) return; closeDrawer(); if (t === state.tab && !state.stack.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; } state.tab = t; set(LS.tab, t); state.stack = []; render(); window.scrollTo(0, 0); }
+  function setTab(t) { if (gpaGuard(function () { setTab(t); })) return; closeDrawer(); if (t !== 'home') noteUse(t); if (t === state.tab && !state.stack.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; } state.tab = t; set(LS.tab, t); state.stack = []; render(); window.scrollTo(0, 0); }
   /* the side menu (all sections), opened with the menu button at the top left */
   function openDrawer() { renderTabbar(); var d = $('drawer'); if (!d) return; d.hidden = false; requestAnimationFrame(function () { d.classList.add('open'); }); }
   function closeDrawer() { var d = $('drawer'); if (!d || d.hidden) return; d.classList.remove('open'); setTimeout(function () { if (!d.classList.contains('open')) d.hidden = true; }, 220); }
@@ -356,22 +356,38 @@
   /* =================================================================== Home */
   function greeting() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function firstNameOf(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
+  /** How often this person opens each section (this phone only), so Home shows the few they really use. */
+  function useKey() { return 'prime_use_' + (state.user ? state.user.username : ''); }
+  function useCounts() { try { return JSON.parse(localStorage.getItem(useKey()) || '{}') || {}; } catch (e) { return {}; } }
+  function noteUse(k) { try { var u = useCounts(); u[k] = (u[k] || 0) + 1; localStorage.setItem(useKey(), JSON.stringify(u)); } catch (e) {} }
+  /** Things waiting on this person right now, most urgent first. Each one says what to do and goes there. */
+  function needsYou() {
+    var c = counts(), st = state.stock, out = [];
+    if (can('confirm') && c.waiting) out.push({ act: 'goto-orders', seg: 'waiting', ic: 'blue', icon: ICON.orders, title: c.waiting + (c.waiting === 1 ? ' order to check' : ' orders to check'), sub: 'See the payment, then tap Confirm' });
+    if (!can('confirm') && c.ready) out.push({ act: 'goto-orders', seg: 'ready', ic: 'green', icon: ICON.orders, title: c.ready + (c.ready === 1 ? ' order ready to hand out' : ' orders ready to hand out'), sub: 'Hand over when they show their code' });
+    if (can('stock_view') && st) st.items.forEach(function (i) {
+      if (i.late) out.push({ act: 'tab', tab: 'stock', ic: 'red', icon: ICON.stock, title: i.name + ': order hasn’t come', sub: 'Ordered ' + i.order.qty + ' on ' + niceYmd(i.order.on) + '. Tap “Books arrived” when it comes' });
+      else if (i.low && !i.order) out.push({ act: 'tab', tab: 'stock', ic: 'red', icon: ICON.stock, title: i.name + ': only ' + i.onHand + ' left', sub: can('stock_edit') ? 'Order more, then tap “I ordered more”' : 'Tell the admin' });
+    });
+    if (can('gpa')) Object.keys(state.gpa.pend).forEach(function (k) { var n = gpaCount(state.gpa.pend[k]); if (n) out.push({ act: 'gpa-open', sheet: k, ic: 'amber', icon: ICON.gpa, title: 'GPA ticks not saved', sub: n + (n === 1 ? ' change' : ' changes') + ' in ' + k + '. Tap to save' }); });
+    return out;
+  }
   PAGES.home = {
     title: 'Home', root: true,
     right: function () { return navBtn('refresh', ICON.refresh, 'Refresh'); },
     html: function () {
       var c = counts(), lowN = state.stock ? state.stock.low.length : 0;
       var h = '<div class="large-row"><h1 class="large">' + esc(greeting()) + (state.user ? ', ' + esc(firstNameOf(state.user.name)) : '') + '</h1></div>' +
-        '<p class="home-date">' + esc(new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })) + '</p>' + lowBanner();
-      // today at a glance
-      var stats = [];
-      if (can('confirm')) stats.push(['orders', c.waiting, c.waiting === 1 ? 'order to confirm' : 'orders to confirm', c.waiting ? 'hot' : '']);
-      stats.push(['orders', c.ready, 'ready for pickup', '']);
-      if (can('cash_take')) stats.push(['cash', state.cashMine ? money(state.cashMine.total) : '\u2013', 'cash you took today', '']);
-      if (can('stock_view') && lowN) stats.push(['stock', lowN, lowN === 1 ? 'book low on stock' : 'books low on stock', 'warn']);
-      h += '<div class="home-stats">' + stats.map(function (x) { return '<button class="home-stat ' + x[3] + '" data-act="tab" data-tab="' + x[0] + '"><b>' + x[1] + '</b><span>' + x[2] + '</span></button>'; }).join('') + '</div>';
-      if (can('cash_take')) h += '<button class="btn primary block" data-act="cash-new" style="margin:14px 0 4px">' + ICON.plus + 'New cash payment</button>';
-      // the sections, like apps on a phone
+        '<p class="home-date">' + esc(new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })) + '</p>';
+      // 1. what needs you now
+      var need = needsYou();
+      h += '<div class="group-head">Needs you</div><div class="group" id="home-needs">' + (need.length ? need.map(function (n) {
+        return '<button class="row" data-act="' + n.act + '"' + (n.seg ? ' data-seg-go="' + n.seg + '"' : '') + (n.tab ? ' data-tab="' + n.tab + '"' : '') + (n.sheet ? ' data-sheet="' + esc(n.sheet) + '"' : '') + '><span class="ic ' + n.ic + '">' + n.icon + '</span><span class="grow"><span class="title">' + esc(n.title) + '</span><span class="sub">' + esc(n.sub) + '</span></span><span class="chev">' + ICON.chev + '</span></button>';
+      }).join('') : '<div class="row"><span class="ic green">' + ICON.check + '</span><span class="grow"><span class="title">All done</span><span class="sub">Nothing is waiting on you right now.</span></span></div>') + '</div>';
+      // 2. the one thing people do most at the desk
+      if (can('cash_take')) h += '<button class="btn primary block" data-act="cash-new" style="margin:16px 0 4px">' + ICON.plus + 'New cash payment</button>' +
+        '<p class="home-cash">You took <b>' + (state.cashMine ? money(state.cashMine.total) : '–') + '</b> in cash today' + (state.cashMine ? ' (' + state.cashMine.count + (state.cashMine.count === 1 ? ' payment)' : ' payments)') : '') + '</p>';
+      // 3. the sections: the 4 this person opens most, the rest behind "All apps"
       var apps = [['orders', 'Book orders', ICON.book, 'blue', can('confirm') ? c.waiting : c.ready]];
       if (can('cash_take')) { apps.push(['cash', 'Cash', ICON.cash, 'green', 0]); apps.push(['@cashbook', 'Cash book', ICON.sheet, 'teal', 0]); }
       if (can('receipts')) apps.push(['receipts', 'Receipts', ICON.receipt, 'rose', 0]);
@@ -380,10 +396,15 @@
       if (can('qr')) apps.push(['qr', 'QR codes', ICON.qr, 'blue', 0]);
       if (can('admin')) apps.push(['admin', 'Admin', ICON.admin, 'violet', 0]);
       apps.push(['me', 'Me', ICON.me, 'grey', 0]);
-      h += '<div class="group-head">Apps</div><div class="apps">' + apps.map(function (a) {
+      var use = useCounts(), order = apps.map(function (a, i) { return { a: a, i: i, n: use[a[0]] || 0 }; });
+      order.sort(function (x, y) { return y.n - x.n || x.i - y.i; });
+      var top = order.slice(0, 4).map(function (x) { return x.a; }), rest = order.slice(4).map(function (x) { return x.a; });
+      var tile = function (a) {
         var attrs = a[0] === '@cashbook' ? 'data-act="cashbook"' : 'data-act="tab" data-tab="' + a[0] + '"';
         return '<button class="app" ' + attrs + ' aria-label="' + esc(a[1]) + '"><span class="app-ic ' + a[3] + '">' + a[2] + (a[4] ? '<i class="badge">' + (a[4] > 99 ? '99+' : a[4]) + '</i>' : '') + '</span><span class="app-name">' + esc(a[1]) + '</span></button>';
-      }).join('') + '</div>';
+      };
+      h += '<div class="group-head">Your apps</div><div class="apps four">' + top.map(tile).join('') + '</div>';
+      if (rest.length) h += '<details class="more-apps"' + (state.moreApps ? ' open' : '') + '><summary>All apps (' + apps.length + ')</summary><div class="apps">' + rest.map(tile).join('') + '</div></details>';
       return h;
     },
     after: function () { if (can('cash_take') && (!state.cashMine || Date.now() - (state.cashMineAt || 0) > 60000)) loadCashMine(); }
@@ -632,14 +653,14 @@
   /* =================================================================== Stock */
   function tileHtml(i) {
     var cls = !i.tracked ? ' untracked' : i.low ? ' low' : '';
-    var stateChip = !i.tracked ? '<span class="t-state none">Not counted yet</span>' : i.low ? '<span class="t-state low">Low</span>' : '<span class="t-state ok">OK</span>';
-    if (i.tracked && i.order) stateChip = '<span class="t-state ' + (i.late ? 'low' : 'ordered') + '">' + (i.late ? 'Not arrived' : 'Ordered') + '</span>';
+    var stateChip = !i.tracked ? '<span class="t-state none">Not counted yet</span>' : i.low ? '<span class="t-state low">Running low</span>' : '<span class="t-state ok">Enough</span>';
+    if (i.tracked && i.order) stateChip = '<span class="t-state ' + (i.late ? 'low' : 'ordered') + '">' + (i.late ? 'Late' : 'On order') + '</span>';
     var h = '<div class="tile' + cls + '" data-tile="' + i.key + '"><div class="t-name">' + esc(i.full || i.name) + '</div>' + (i.note ? '<div class="t-note">' + esc(i.note) + '</div>' : '') + '<div class="t-num">' + (i.tracked ? i.onHand : '–') + '</div>' +
-      '<div class="t-sub">' + (can('stock_edit') ? '<button class="alert-at" data-act="stock-threshold" data-item="' + i.key + '">Alert at ' + i.threshold + '</button>' : '<span>Alert at ' + i.threshold + '</span>') + stateChip + '</div>';
-    if (i.order) h += '<div class="t-order' + (i.late ? ' late' : '') + '">Ordered <b>' + i.order.qty + '</b> on ' + esc(niceYmd(i.order.on)) + (i.order.days > 0 ? ' · ' + i.order.days + (i.order.days === 1 ? ' day' : ' days') + ' ago' : ' · today') +
+      '<div class="t-sub">' + (can('stock_edit') ? '<button class="alert-at" data-act="stock-threshold" data-item="' + i.key + '">Remind at ' + i.threshold + '</button>' : '<span>Remind at ' + i.threshold + '</span>') + stateChip + '</div>';
+    if (i.order) h += '<div class="t-order' + (i.late ? ' late' : '') + '">On order: <b>' + i.order.qty + '</b>, ordered ' + esc(niceYmd(i.order.on)) + (i.order.days > 0 ? ' (' + i.order.days + (i.order.days === 1 ? ' day' : ' days') + ' ago)' : ' (today)') +
       (can('stock_edit') ? ' <button class="link" data-act="stock-orderclear" data-item="' + i.key + '">Cancel order</button>' : '') + '</div>';
-    if (can('stock_edit')) h += '<div class="t-actions"><button class="btn" data-act="stock-receive" data-item="' + i.key + '">Receive</button><button class="btn" data-act="stock-count" data-item="' + i.key + '">Count</button>' +
-      (i.order ? '' : '<button class="btn' + (i.low ? ' primary' : '') + '" data-act="stock-order" data-item="' + i.key + '">Ordered</button>') + '</div>';
+    if (can('stock_edit')) h += '<div class="t-actions"><button class="btn" data-act="stock-receive" data-item="' + i.key + '">Books arrived</button><button class="btn" data-act="stock-count" data-item="' + i.key + '">Fix the count</button></div>' +
+      (i.order ? '' : '<button class="btn block' + (i.low ? ' primary' : '') + '" data-act="stock-order" data-item="' + i.key + '" style="margin-top:8px">I ordered more</button>');
     return h + '</div>';
   }
   function logRowHtml(l) {
@@ -652,9 +673,9 @@
     var st = state.stock;
     var untracked = st && st.items.some(function (i) { return !i.tracked; });
     $('stock-body').innerHTML = !st ? loadingHtml() : lowBanner() +
-      (untracked && can('stock_edit') ? '<div class="banner amber">' + ICON.box + '<span class="grow">Tap <b>Count</b> on each book to enter what’s on the shelf. Tracking and alerts start after that.</span></div>' : '') +
+      (untracked && can('stock_edit') ? '<div class="banner amber">' + ICON.box + '<span class="grow">First, count the books on the shelf. Tap <b>Fix the count</b> on each book and type the number.</span></div>' : '') +
       '<div class="stock-grid">' + st.items.map(tileHtml).join('') + '</div>' +
-      '<p class="group-foot">Each pickup takes one of each book in the order (the palliative bundle takes a textbook and a workbook). GPA books come off when they’re ticked in the GPA tab. When a book reaches its alert level, the owner and admins get a notification every hour (9 am–6 pm) until someone taps <b>Ordered</b>; if the order hasn’t arrived 7 days later, a daily reminder. <b>Receive</b> closes the order.</p>' +
+      '<p class="group-foot"><b>How it works.</b> A book comes off the count when a student picks it up, or when they’re ticked in GPA books. When a book runs low, the owner and admins get a reminder every hour (9 am–6 pm) until someone taps <b>I ordered more</b>. When the books come, tap <b>Books arrived</b>.</p>' +
       '<div class="group-head">Recent changes</div>' +
       (state.stockLogRows === null ? loadingHtml() : state.stockLogRows.length ? '<div class="group">' + state.stockLogRows.slice(0, 40).map(logRowHtml).join('') + '</div>' : '<p class="group-foot">No changes yet.</p>');
   }
@@ -674,17 +695,17 @@
     var i = stockItem(key); if (!i) return;
     var mode = act.replace('stock-', '');
     if (mode === 'orderclear') {
-      return dialog({ title: 'Cancel the order?', html: 'The order of ' + i.order.qty + ' on ' + esc(niceYmd(i.order.on)) + ' is removed. If ' + esc(i.name) + ' is still low, the hourly reminders start again.', ok: 'Cancel order', cancel: 'Keep it', destructive: true,
+      return dialog({ title: 'Cancel this order?', html: 'Only if the order of ' + i.order.qty + ' (' + esc(niceYmd(i.order.on)) + ') isn’t coming. If ' + esc(i.name) + ' is still low, the hourly reminders start again.', ok: 'Cancel order', cancel: 'Keep it', destructive: true,
         inputs: [{ key: 'note', placeholder: 'Why? (optional)', maxlength: 120 }] }).then(function (r) {
         if (!r) return;
         sapi('stockAdjust', [key, { mode: 'order_clear', note: r.note || '' }]).then(function (st) { state.stock = st; toast('Order cancelled'); return refreshStockQuiet(); }).catch(function (e) { if (!e.signedOut) toast(e.message); });
       });
     }
     var cfg = {
-      receive: { title: 'Receive ' + i.name, html: 'How many arrived?' + (i.tracked ? ' You have ' + i.onHand + ' now.' : ''), ok: 'Add', inputs: [{ key: 'qty', type: 'number', placeholder: 'Number of books' }, { key: 'note', placeholder: 'Note (optional), e.g. supplier invoice #' , maxlength: 120 }] },
-      count: { title: 'Count ' + i.name, html: 'How many are on the shelf right now?' + (i.tracked ? ' The app thinks ' + i.onHand + '.' : ''), ok: 'Save count', inputs: [{ key: 'qty', type: 'number', placeholder: 'Books on the shelf', value: i.tracked ? String(i.onHand) : '' }, { key: 'note', placeholder: 'Note (optional)', maxlength: 120 }] },
-      threshold: { title: 'Alert level', html: 'Remind the owner and admins when ' + esc(i.name) + ' drops to this number or below.', ok: 'Save', inputs: [{ key: 'qty', type: 'number', value: String(i.threshold) }] },
-      order: { title: 'Ordered ' + i.name, html: 'Enter the order once it’s placed. The hourly reminders stop; they come back daily if it hasn’t arrived in 7 days. Tap <b>Receive</b> when the books come.', ok: 'Save order',
+      receive: { title: 'Books arrived', html: 'How many ' + esc(i.name) + ' came in?' + (i.tracked ? ' There are ' + i.onHand + ' on the shelf now.' : ''), ok: 'Add them', inputs: [{ key: 'qty', type: 'number', placeholder: 'Number of books' }, { key: 'note', placeholder: 'Note (optional), e.g. supplier invoice #' , maxlength: 120 }] },
+      count: { title: 'Fix the count', html: 'Count the ' + esc(i.name) + ' on the shelf and type the number.' + (i.tracked ? ' The app thinks ' + i.onHand + '.' : ''), ok: 'Save', inputs: [{ key: 'qty', type: 'number', placeholder: 'Books on the shelf', value: i.tracked ? String(i.onHand) : '' }, { key: 'note', placeholder: 'Note (optional)', maxlength: 120 }] },
+      threshold: { title: 'When to remind', html: 'Start reminding the owner and admins when ' + esc(i.name) + ' gets down to this number.', ok: 'Save', inputs: [{ key: 'qty', type: 'number', value: String(i.threshold) }] },
+      order: { title: 'I ordered more', html: 'How many ' + esc(i.name) + ' did you order, and when? The reminders stop now. When the books come, tap <b>Books arrived</b>.', ok: 'Save',
         inputs: [{ key: 'qty', type: 'number', placeholder: 'How many you ordered' }, { key: 'date', type: 'date', value: todayStr(), max: todayStr(), label: 'Date ordered' }, { key: 'note', placeholder: 'Note (optional), e.g. supplier', maxlength: 120 }] }
     }[mode];
     if (!cfg) return;
@@ -699,7 +720,7 @@
       if (!r) return;
       state.busy = true;
       sapi('stockAdjust', [key, { mode: mode, qty: Number(r.qty), note: r.note || '', date: r.date || '' }]).then(function (st) {
-        state.stock = st; toast(mode === 'receive' ? 'Added ' + r.qty + ' · ' + i.name : mode === 'count' ? i.name + ': ' + r.qty + ' on the shelf' : mode === 'order' ? 'Order saved · reminders stopped' : 'Alert level saved');
+        state.stock = st; toast(mode === 'receive' ? r.qty + ' added · ' + i.name : mode === 'count' ? i.name + ': ' + r.qty + ' on the shelf' : mode === 'order' ? 'Saved. Reminders stopped' : 'Saved');
         buzz(20); return refreshStockQuiet();
       }).catch(function (e) { if (!e.signedOut) toast(e.message); }).then(function () { state.busy = false; });
     });
@@ -715,7 +736,7 @@
     if (current().page !== 'gpaBatch' || !gpaDirty()) return false;
     closeDrawer();
     var n = gpaDirty();
-    dialog({ title: 'Save the ticks first?', html: n + (n === 1 ? ' change isn’t' : ' changes aren’t') + ' saved yet for ' + esc(state.gpa.view ? state.gpa.view.title : 'this batch') + '.', ok: 'Save', cancel: 'Don’t save', strict: true })
+    dialog({ title: 'Save your ticks?', html: 'You made ' + n + (n === 1 ? ' change' : ' changes') + ' but didn’t tap Save yet.', ok: 'Save', cancel: 'Don’t save', strict: true })
       .then(function (r) {
         if (r) return gpaSaveAct().then(function (ok) { if (ok) then(); });
         delete state.gpa.pend[state.gpa.sheet]; then();
@@ -724,14 +745,14 @@
   }
   function gpaStockLine(st) {
     if (!st) return '';
-    if (!st.tracked) return '<div class="banner amber">' + ICON.box + '<span class="grow">GPA books aren’t counted yet, so ticks don’t change stock. ' + (can('stock_edit') ? 'Count them in <b>Stock</b>.' : 'Ask an admin to count them.') + '</span></div>';
+    if (!st.tracked) return '<div class="banner amber">' + ICON.box + '<span class="grow">The GPA books on the shelf haven’t been counted yet. ' + (can('stock_edit') ? 'Go to <b>Stock</b> and tap <b>Fix the count</b> on the GPA book.' : 'Ask an admin to count them in Stock.') + '</span></div>';
     return '<p class="gpa-stock' + (st.low ? ' low' : '') + '">' + ICON.box + '<span><b>' + st.onHand + '</b> GPA books on the shelf' + (st.low ? ' · low' : '') + '</span></p>';
   }
   PAGES.gpa = {
     title: 'GPA books', root: true,
     right: function () { return navBtn('gpa-refresh', ICON.refresh, 'Refresh'); },
     html: function () {
-      var b = state.gpa.batches, h = '<div class="large-row"><h1 class="large">GPA books</h1></div><p class="lead">Module 9 · free for students. Pick the batch doing GPA, tick who got a book, save. Students from another batch: open their batch and tick them there.</p>';
+      var b = state.gpa.batches, h = '<div class="large-row"><h1 class="large">GPA books</h1></div><p class="lead">1. Pick the class doing GPA. 2. Tick each student who got a book. 3. Tap Save. A student from another class? Open their class and tick them there.</p>';
       if (!b) return h + loadingHtml();
       h += gpaStockLine(b.stock);
       if (!b.batches.length) return h + '<p class="group-foot">No batches in the workbook yet.</p>';
@@ -755,9 +776,9 @@
       var P = gpaPend();
       var have = v.students.filter(function (s) { return s.issues.length; }).length;
       var h = '<h1 class="large gpa-title">' + esc(v.title) + '</h1><p class="lead">' + have + ' of ' + v.students.length + ' have a GPA book.</p>' + gpaStockLine(v.stock) +
-        '<div class="group"><label class="row gpa-date"><span class="grow"><span class="title">Date given</span><span class="sub">Used for the students you tick now</span></span><input type="date" id="gpa-date" max="' + esc(v.today) + '" value="' + esc(P.date || v.today) + '"></label></div>' +
+        '<div class="group"><label class="row gpa-date"><span class="grow"><span class="title">Date given</span><span class="sub">The day the books were given out</span></span><input type="date" id="gpa-date" max="' + esc(v.today) + '" value="' + esc(P.date || v.today) + '"></label></div>' +
         '<div class="group-head">Students</div><div class="group" id="gpa-list">' + v.students.map(gpaRowHtml).join('') + '</div>' +
-        '<p class="group-foot">Tick a student to give them a book; untick a saved one to take it back (the book goes back on the shelf). Every change is logged with your name.</p>' +
+        '<p class="group-foot"><b>Tick</b> = they got a book. <b>Untick</b> = you took it back (it goes back on the shelf). Every change is saved with your name.</p>' +
         '<div id="gpa-bar" class="rc-make"' + (gpaDirty() ? '' : ' hidden') + '>' + gpaBarHtml() + '</div>';
       return h;
     },
@@ -769,9 +790,9 @@
       return '<label class="row"><input type="checkbox" data-gpa-give="' + esc(s.key) + '"' + (P.give[s.key] ? ' checked' : '') + '><span class="grow"><span class="title">' + esc(s.name) + '</span><span class="sub">' + (P.give[s.key] ? '<b class="gpa-new">New · ' + esc(niceYmd(P.date || g.view.today)) + ' · not saved</b>' : esc(s.studentId || 'No student ID')) + '</span></span></label>';
     }
     var back = !!P.undo[last.id], other = last.batch && last.batch !== g.view.sheet;
-    var sub = back ? '<b class="gpa-back">Taken back when you save</b>' : 'Got it ' + esc(niceYmd(last.on)) + ' · ' + esc(last.by) + (other ? ' · with ' + esc(last.batch) : '') + (last.kind === 'replacement' ? ' · replacement: ' + esc(last.reason) : '') + (s.issues.length > 1 ? ' · ' + s.issues.length + ' books' : '');
+    var sub = back ? '<b class="gpa-back">Will be taken back when you tap Save</b>' : 'Got a book ' + esc(niceYmd(last.on)) + ' · ' + esc(last.by) + (other ? ' · with class ' + esc(last.batch) : '') + (last.kind === 'replacement' ? ' · replacement: ' + esc(last.reason) : '') + (s.issues.length > 1 ? ' · ' + s.issues.length + ' books' : '');
     return '<div class="row gpa-had"><label class="gpa-chk"><input type="checkbox" data-gpa-undo="' + esc(last.id) + '"' + (back ? '' : ' checked') + ' aria-label="' + esc(s.name) + ' has a book"></label><span class="grow"><span class="title">' + esc(s.name) + '</span><span class="sub">' + sub + '</span></span>' +
-      (back ? '' : '<button class="btn small" data-act="gpa-redate" data-id="' + esc(last.id) + '">Date</button><button class="btn small" data-act="gpa-replace" data-key="' + esc(s.key) + '">Another</button>') + '</div>';
+      (back ? '' : '<button class="btn small" data-act="gpa-redate" data-id="' + esc(last.id) + '">Change date</button><button class="btn small" data-act="gpa-replace" data-key="' + esc(s.key) + '">Replacement</button>') + '</div>';
   }
   function gpaBarHtml() {
     var P = gpaPend(), a = Object.keys(P.give).length, b = Object.keys(P.undo).length;
@@ -817,16 +838,16 @@
   function gpaRedateAct(id) {
     var g = state.gpa, s = g.view && g.view.students.filter(function (x) { return x.issues.some(function (i) { return i.id === id; }); })[0]; if (!s) return;
     var iss = s.issues.filter(function (i) { return i.id === id; })[0];
-    dialog({ title: 'Date for ' + s.name, html: 'Fixes the date on the book already recorded. Stock doesn’t change.', ok: 'Save', inputs: [{ key: 'date', type: 'date', value: iss.on, max: g.view.today, label: 'Date given' }],
+    dialog({ title: 'Change the date', html: 'When did ' + esc(s.name) + ' get the book?', ok: 'Save', inputs: [{ key: 'date', type: 'date', value: iss.on, max: g.view.today, label: 'Date given' }],
       validate: function (v) { return /^\d{4}-\d{2}-\d{2}$/.test(v.date) ? (v.date > g.view.today ? 'Can’t be in the future.' : '') : 'Pick a date.'; } })
       .then(function (r) { if (!r || r.date === iss.on) return; sapi('gpaSetDate', [{ sheet: g.sheet, id: id, date: r.date }]).then(function (v) { g.view = v; rerender(); toast('Date changed'); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
   }
   function gpaReplaceAct(key) {
     var g = state.gpa, s = g.view && g.view.students.filter(function (x) { return x.key === key; })[0]; if (!s) return;
-    dialog({ title: 'Another book for ' + s.name + '?', html: 'Only if they need a second one (lost, damaged). One more comes off stock.', ok: 'Give another',
+    dialog({ title: 'Give a replacement?', html: 'Only if ' + esc(s.name) + ' needs a second book (lost or damaged). One more book comes off the shelf.', ok: 'Give replacement',
       inputs: [{ key: 'reason', placeholder: 'Why? (required), e.g. lost it', maxlength: 120 }, { key: 'date', type: 'date', value: g.view.today, max: g.view.today, label: 'Date given' }],
       validate: function (v) { return v.reason.length < 3 ? 'Say why they need another.' : /^\d{4}-\d{2}-\d{2}$/.test(v.date) ? '' : 'Pick a date.'; } })
-      .then(function (r) { if (!r) return; sapi('gpaReplace', [{ sheet: g.sheet, key: key, date: r.date, reason: r.reason }]).then(function (v) { g.view = v; g.batches = null; rerender(); toast('Saved: another book for ' + firstNameOf(s.name)); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+      .then(function (r) { if (!r) return; sapi('gpaReplace', [{ sheet: g.sheet, key: key, date: r.date, reason: r.reason }]).then(function (v) { g.view = v; g.batches = null; rerender(); toast('Saved: replacement for ' + firstNameOf(s.name)); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
   }
   window.addEventListener('beforeunload', function (e) { if (Object.keys(state.gpa.pend).some(function (k) { return gpaCount(state.gpa.pend[k]); })) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -1922,10 +1943,10 @@
       if (u.tabs && !mine) {
         h += '<div class="group-head">Tabs ' + esc(firstName(u.name)) + ' can open</div><div class="group">' + u.tabs.map(function (t) {
           var fixed = !t.canGrant && !t.byRole;
-          var sub = fixed ? 'Comes with the Admin role' : t.custom ? (t.on ? 'Turned on by you' : 'Turned off by you') : (t.on ? 'On for ' : 'Off for ') + esc(u.roleLabel);
+          var sub = fixed ? 'Only for the Admin role' : t.custom ? (t.on ? 'You turned this on' : 'You turned this off') : (t.on ? 'On, like every ' : 'Off, like every ') + esc(u.roleLabel);
           return '<div class="row"><span class="grow"><span class="title">' + esc(t.label) + '</span><span class="sub">' + sub + '</span></span><label class="switch"><input type="checkbox" data-tabsw="' + t.key + '" data-username="' + esc(u.username) + '"' + (t.on ? ' checked' : '') + (fixed ? ' disabled' : '') + ' aria-label="' + esc(t.label) + '"><span></span></label></div>';
-        }).join('') + (u.tabs.some(function (t) { return t.custom; }) ? '<button class="row accent" data-act="tabs-reset" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Back to what ' + esc(u.roleLabel) + ' gets</span></span></button>' : '') +
-          '</div><p class="group-foot">Book orders and Me are always there. A tab only lets them see and use it; voiding cash, the cash report, settings and managing staff stay with the role. Changes apply the next time their app refreshes.</p>';
+        }).join('') + (u.tabs.some(function (t) { return t.custom; }) ? '<button class="row accent" data-act="tabs-reset" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Undo my changes (back to normal ' + esc(u.roleLabel) + ')</span></span></button>' : '') +
+          '</div><p class="group-foot">Turn a tab on to let them use it. Book orders and Me are always on. Voiding cash, the cash report, settings and managing staff never change here. Their app updates within a minute.</p>';
       }
       h += '<div class="group-head">Actions</div><div class="group">' +
         (locked && !mine ? '' : '<button class="row accent" data-act="staff-reset" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Reset password</span><span class="sub">Makes a new password and signs them out of every phone.</span></span></button>');
@@ -2255,7 +2276,7 @@
         case 'back': return back();
         case 'go': return go(b.dataset.page, b.dataset.username ? { username: b.dataset.username } : b.dataset.cash ? { cash: b.dataset.cash } : {});
         case 'tab': return setTab(b.dataset.tab);
-        case 'goto-orders': state.seg = b.dataset.seg; set(LS.seg, state.seg); return setTab('orders');
+        case 'goto-orders': state.seg = b.dataset.segGo || b.dataset.seg; set(LS.seg, state.seg); return setTab('orders');
         case 'refresh': return current().page === 'stock' ? refreshStockQuiet().then(function () { toast('Stock updated'); }) : loadOrders(false);
         case 'refresh-admin': return loadAdmin();
         case 'gpa-refresh': state.gpa.batches = null; rerender(); return loadGpaBatches();
@@ -2297,7 +2318,7 @@
         case 'cash-edit': return cashEditAct(b.dataset.cash);
         case 'cash-unvoid': return cashUnvoidAct(b.dataset.cash);
         case 'practice-wipe': return practiceWipe();
-        case 'cashbook': return go('cashBook', { date: '' });
+        case 'cashbook': noteUse('@cashbook'); return go('cashBook', { date: '' });
         case 'cb-prev': case 'cb-next': { var d = new Date((state.cashBook ? state.cashBook.date : todayStr()) + 'T12:00:00'); d.setDate(d.getDate() + (b.dataset.act === 'cb-prev' ? -1 : 1)); return go('cashBook', { date: localDate(d) }); }
         case 'cb-day': state.cbView = 'day'; return go('cashBook', { date: b.dataset.date });
         case 'cb-open': return cashBookOpenAct();
@@ -2330,7 +2351,7 @@
           });
       }
     });
-    document.addEventListener('toggle', function (e) { var dd = e.target; if (dd && dd.dataset && dd.dataset.more) state.openMore[dd.dataset.more] = dd.open; if (dd && dd.dataset && dd.dataset.rcbatch !== undefined) state.rcOpen[dd.dataset.rcbatch] = dd.open; }, true);
+    document.addEventListener('toggle', function (e) { var dd = e.target; if (dd && dd.dataset && dd.dataset.more) state.openMore[dd.dataset.more] = dd.open; if (dd && dd.classList && dd.classList.contains('more-apps')) state.moreApps = dd.open; if (dd && dd.dataset && dd.dataset.rcbatch !== undefined) state.rcOpen[dd.dataset.rcbatch] = dd.open; }, true);
     document.addEventListener('submit', function (e) { if (e.target.id !== 'login-form') e.preventDefault(); });
     window.addEventListener('scroll', onScroll, { passive: true });
     document.addEventListener('visibilitychange', function () {
