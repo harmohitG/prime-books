@@ -286,9 +286,11 @@
   function tabsFor() {
     var t = [{ key: 'home', label: 'Home', icon: ICON.house }, { key: 'orders', label: 'Book orders', icon: ICON.orders }];
     if (can('cash_take')) t.push({ key: 'cash', label: 'Cash', icon: ICON.cash });
-    if (can('receipts')) t.push({ key: 'receipts', label: 'Receipts', icon: ICON.receipt });
+    if (can('receipts') && state.user.role === 'developer') t.push({ key: 'receipts', label: 'Receipts', icon: ICON.receipt });   // Receipts shown to you (Developer) only (2026-11-08)
     if (can('stock_view')) t.push({ key: 'stock', label: 'Stock', icon: ICON.stock });
-    if (can('gpa')) t.push({ key: 'gpa', label: 'GPA books', icon: ICON.gpa });
+    // GPA books tab hidden 2026-11-08 (unused). The whole feature is kept in the code — to
+    // bring it back, just uncomment the next line:
+    // if (can('gpa')) t.push({ key: 'gpa', label: 'GPA books', icon: ICON.gpa });
     if (can('qr')) t.push({ key: 'qr', label: 'QR codes', icon: ICON.qr });
     if (can('admin')) t.push({ key: 'admin', label: 'Admin', icon: ICON.admin });
     t.push({ key: 'me', label: 'Me', icon: ICON.me });
@@ -462,10 +464,11 @@
     if (tags.length) h += '<div class="c-tags">' + tags.map(function (f) { return '<span class="tag">' + esc(f) + '</span>'; }).join('') + '</div>';
     if (o.status === 'READY') h += '<div class="c-code"><span>Pickup code</span><b>' + esc(o.pickupCode) + '</b></div>';
     if (waiting && can('confirm')) {
-      if (o.included) h += '<div class="c-hint">Books are in their fees. Nothing to check.</div>';
-      else if (o.status === 'SENT') h += '<div class="c-hint">Look in the e-transfer inbox for <b>' + money(o.amount) + '</b> with the message <b>Order ' + o.orderNo + '</b>.</div>';
-      else h += '<div class="c-hint">They haven’t said it’s sent yet. Confirm only if <b>' + money(o.amount) + '</b> is in the inbox.</div>';
-      h += '<div class="c-act"><button class="btn primary" data-act="confirm">' + (o.included ? 'Confirm and send code' : 'Payment received · send code') + '</button></div>';
+      if (o.included) h += '<div class="c-hint">Books are in their fees — nothing to check. Hand them over.</div>';
+      else if (o.status === 'SENT') h += '<div class="c-hint">Check the e-transfer inbox for <b>' + money(o.amount) + '</b> with the message <b>Order ' + o.orderNo + '</b>, then hand over the books.</div>';
+      else h += '<div class="c-hint">They haven’t said it’s sent yet. Only issue once <b>' + money(o.amount) + '</b> is in the inbox.</div>';
+      h += '<div class="c-act"><button class="btn primary" data-act="paidissued">' + (o.included ? 'Issued · hand over' : 'Paid & issued') + '</button></div>' +
+        '<div class="more-actions"><button class="btn small" data-act="confirm">Send code · pick up later</button></div>';
     }
     if (o.status === 'READY' && can('pickup')) h += '<div class="c-act"><button class="btn primary" data-act="pickup">Hand over · mark picked up</button></div>';
     // details
@@ -575,6 +578,11 @@
           : 'Only confirm once <b>' + money(o.amount) + '</b> from ' + esc(nm) + ' is in the e-transfer inbox (message “Order ' + o.orderNo + '”).',
         ok: o.included ? 'Send code' : 'Yes, send code' })
         .then(function (r) { if (r) runOrderAction(btn, 'confirmPayment', [o.orderNo], function (x) { toast('Code ' + x.pickupCode + ' sent to ' + firstName(nm)); }); });
+    } else if (act === 'paidissued') {
+      dialog({ title: o.included ? 'Hand over to ' + firstName(nm) + '?' : 'Paid & issued?',
+        html: (o.included ? esc(nm) + '’s books are included in their fees. ' : 'Confirm <b>' + money(o.amount) + '</b> from ' + esc(nm) + ' is in the e-transfer inbox (message “Order ' + o.orderNo + '”). ') + 'Then hand over: <b>' + esc(itemsText(o)) + '</b>.',
+        ok: o.included ? 'Hand over' : 'Paid & issued' })
+        .then(function (r) { if (r) runOrderAction(btn, 'markPaidIssued', [o.orderNo], function (x) { toast(firstName(nm) + ' · paid & issued #' + x.orderNo); refreshStockQuiet(); }); });
     } else if (act === 'pickup') {
       dialog({ title: 'Hand over to ' + firstName(nm) + '?', html: 'Check their code matches <b style="font-family:var(--mono);letter-spacing:2px">' + esc(o.pickupCode) + '</b>, then give them: ' + esc(itemsText(o)) + '.', ok: 'Picked up' })
         .then(function (r) { if (r) runOrderAction(btn, 'markPickedUp', [o.orderNo], function (x) { toast(firstName(nm) + ' picked up #' + x.orderNo); refreshStockQuiet(); }); });
@@ -1605,7 +1613,7 @@
       var s = state.settings, st = state.rcStaff;
       if (!s || !st) return loadingHtml();
       var titles = {}; try { titles = JSON.parse(s.receipt_titles || '{}') || {}; } catch (e) { titles = {}; }
-      var def = { owner: 'Accounts & Finance Administrator', admin: 'Admin', reception: 'Reception' };
+      var def = { developer: 'Accounts & Finance Administrator', owner: 'Owner', checker: 'Accounts & Finance Administrator' };
       return '<div class="group-head">Issued by</div><div class="group">' + st.filter(function (u) { return u.status === 'active'; }).map(function (u) {
         return '<label class="cell"><span>' + esc(firstName(u.name)) + '</span><input data-rctitle="' + esc(u.username) + '" type="text" maxlength="60" placeholder="' + esc(def[u.role] || 'Staff') + '" value="' + esc(titles[u.username] || '') + '"></label>';
       }).join('') + '</div><p class="group-foot">Printed as “Name (Title)” on receipts they make. Blank = the grey default. Receipts dated before June 1, 2026 always say Navneet (Admissions Officer).</p>' +
@@ -1906,7 +1914,7 @@
     right: function () { return '<button class="nav-btn" data-act="go" data-page="staffNew" aria-label="Add staff">' + ICON.plus + '</button>'; },
     html: function () {
       if (!state.staff) return loadingHtml();
-      var list = state.staff.staff.slice().sort(function (a, b) { return (a.role === b.role ? 0 : a.role === 'admin' ? -1 : 1) || a.name.localeCompare(b.name); });
+      var list = state.staff.staff.slice().sort(function (a, b) { var rk = { developer: 0, owner: 1, checker: 2, handler: 3 }; return ((rk[a.role] == null ? 9 : rk[a.role]) - (rk[b.role] == null ? 9 : rk[b.role])) || a.name.localeCompare(b.name); });
       return '<div class="group">' + list.map(function (u) {
         return '<button class="row" data-act="go" data-page="staffDetail" data-username="' + esc(u.username) + '"><span class="avatar">' + esc(initials(u.name)) + '</span>' +
           '<span class="grow"><span class="title">' + esc(u.name) + (u.username === state.user.username ? ' <span class="faint">(you)</span>' : '') + '</span><span class="sub">@' + esc(u.username) + ' · ' + esc(u.roleLabel) + '</span></span>' +
@@ -1924,14 +1932,14 @@
     html: function (c) {
       var u = staffByName(c.params.username); if (!u) return loadingHtml();
       var mine = u.username === state.user.username, roles = state.staff.roles;
-      var locked = u.role === 'owner' || ((u.role === 'admin') && !can('manage_admins'));   // server enforces; the app just hides what can't happen
+      var locked = u.role === 'developer' || ((u.role === 'owner') && !can('manage_admins'));   // server enforces; the app just hides what can't happen
       var pinCell = u.hasPin ? (state.revealPin[u.username] ? '<span class="pin-reveal">' + esc(u.pin) + '</span> <button class="link" data-act="pin-hide" data-username="' + esc(u.username) + '">Hide</button>'
         : '•••• <button class="link" data-act="pin-show" data-username="' + esc(u.username) + '">Show</button>') : '<span class="faint">Picks one at first sign-in</span>';
       var h = '<div class="profile"><span class="avatar lg">' + esc(initials(u.name)) + '</span><div class="p-name">' + esc(u.name) + '</div><div class="p-sub">@' + esc(u.username) + ' · ' + esc(u.roleLabel) + '</div><div style="margin-top:8px">' + staffChip(u) + '</div></div>';
       h += '<div class="group-head">Account</div><div class="group">' +
         '<button class="row" data-act="staff-rename" data-username="' + esc(u.username) + '"><span class="grow"><span class="title">Name</span></span><span class="value">' + esc(u.name) + '</span><span class="chev">' + ICON.chev + '</span></button>' +
-        (u.role === 'owner' ? '<div class="row"><span class="grow"><span class="title">Role</span><span class="sub">The owner account. It can’t be changed or removed.</span></span><span class="value">Owner</span></div>'
-        : locked ? '<div class="row"><span class="grow"><span class="title">Role</span><span class="sub">Only the owner can change an admin.</span></span><span class="value">' + esc(u.roleLabel) + '</span></div>'
+        (u.role === 'developer' ? '<div class="row"><span class="grow"><span class="title">Role</span><span class="sub">Your developer account. It can’t be changed or removed.</span></span><span class="value">' + esc(u.roleLabel) + '</span></div>'
+        : locked ? '<div class="row"><span class="grow"><span class="title">Role</span><span class="sub">Only an owner can change this account.</span></span><span class="value">' + esc(u.roleLabel) + '</span></div>'
         : '<div class="row"><span class="grow"><span class="title">Role</span>' + (mine ? '<span class="sub">You can’t change your own role.</span>' : '') + '</span><span class="segctl">' + roles.map(function (r) {
           return '<button data-act="staff-role" data-username="' + esc(u.username) + '" data-role="' + r.key + '" class="' + (u.role === r.key ? 'on' : '') + '"' + (mine ? ' disabled' : '') + '>' + esc(r.label) + '</button>';
         }).join('') + '</span></div>') +
@@ -2018,17 +2026,22 @@
   }
 
   /* ---------- new staff ---------- */
+  function roleHelp(role) {
+    return { owner: 'Owner: full business powers — approvals, settings, the cash report. (No Receipts.)',
+      checker: 'Checker (accountant): clears and verifies cash, sees the cash report, can void or fix records.',
+      handler: 'Handler (desk): takes payments and issues books. Cash in only.' }[role] || '';
+  }
   PAGES.staffNew = {
     title: 'New staff member',
     html: function () {
-      var roles = state.staff ? state.staff.roles : [{ key: 'reception', label: 'Reception' }, { key: 'admin', label: 'Admin' }];
+      var roles = state.staff ? state.staff.roles : [{ key: 'handler', label: 'Handler' }, { key: 'checker', label: 'Checker' }, { key: 'owner', label: 'Owner' }];
       return '<div class="group">' +
         '<label class="cell"><span>Full name</span><input id="ns-name" type="text" autocomplete="off" placeholder="e.g. Priya Sharma" maxlength="60"></label>' +
         '<label class="cell"><span>Username</span><input id="ns-username" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="e.g. priyas" maxlength="20"></label>' +
         '<div class="row"><span class="grow"><span class="title">Role</span></span><span class="segctl" id="ns-role">' +
-        roles.slice().sort(function (a) { return a.key === 'reception' ? -1 : 1; }).map(function (r) { return '<button type="button" data-role="' + r.key + '" class="' + (r.key === 'reception' ? 'on' : '') + '">' + esc(r.label) + '</button>'; }).join('') +
+        roles.slice().sort(function (a) { return a.key === 'handler' ? -1 : 1; }).map(function (r) { return '<button type="button" data-role="' + r.key + '" class="' + (r.key === 'handler' ? 'on' : '') + '">' + esc(r.label) + '</button>'; }).join('') +
         '</span></div></div>' +
-        '<p class="group-foot" id="ns-role-help">Reception: sees orders that are ready, hands them out, sees stock.</p>' +
+        '<p class="group-foot" id="ns-role-help">' + roleHelp('handler') + '</p>' +
         '<div class="group-head">Password</div><div class="group">' +
         '<label class="cell"><span>Password</span><input id="ns-password" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Leave blank to make one" maxlength="72"></label></div>' +
         '<p class="group-foot">Leave it blank and the app makes an easy-to-read one, like <code>maple-river-482</code>. You’ll see it once to pass on.</p>' +
@@ -2040,13 +2053,13 @@
       $('ns-role').addEventListener('click', function (e) {
         var b = e.target.closest('[data-role]'); if (!b) return;
         Array.prototype.forEach.call($('ns-role').children, function (x) { x.classList.toggle('on', x === b); });
-        $('ns-role-help').textContent = b.dataset.role === 'admin' ? 'Admin: everything, including confirming payments, staff accounts and settings.' : 'Reception: sees orders that are ready, hands them out, sees stock.';
+        $('ns-role-help').textContent = roleHelp(b.dataset.role);
       });
       setTimeout(function () { var el = $('ns-name'); if (el) el.focus(); }, 60);
     }
   };
   function createStaff() {
-    var role = document.querySelector('#ns-role .on'); role = role ? role.dataset.role : 'reception';
+    var role = document.querySelector('#ns-role .on'); role = role ? role.dataset.role : 'handler';
     var f = { name: $('ns-name').value.trim(), username: $('ns-username').value.trim().toLowerCase(), role: role, password: $('ns-password').value };
     if (!f.name) return err('ns-error', 'Enter their name.');
     if (!/^[a-z0-9._-]{3,20}$/.test(f.username)) return err('ns-error', 'Username: 3–20 letters or numbers (dots, dashes, underscores are OK).');
@@ -2265,7 +2278,7 @@
       if (af) { state.actFilter = af.dataset.actfilter; rerender(); return; }
       var b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
       var act = b.dataset.act, card = b.closest('.card'), o = card ? orderByNo(Number(card.dataset.no)) : null;
-      if (o && ['confirm', 'pickup', 'cancel', 'note'].indexOf(act) !== -1) return orderAct(act, o, b);
+      if (o && ['paidissued', 'confirm', 'pickup', 'cancel', 'note'].indexOf(act) !== -1) return orderAct(act, o, b);
       if (act.indexOf('stock-') === 0) return stockAct(act, b.dataset.item);
       if (act.indexOf('staff-') === 0 || act.indexOf('pin-') === 0) {
         if (act === 'staff-create') return createStaff();
@@ -2364,9 +2377,10 @@
     window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); state.deferredInstall = e; });
   }
   function confirmRole(u, role) {
-    var label = role === 'admin' ? 'Admin' : 'Reception';
-    dialog({ title: 'Make ' + firstName(u.name) + ' ' + label + '?', html: (role === 'admin' ? 'Admins can confirm payments, manage staff and change settings.' : 'Reception can hand out ready orders and see stock.') + ' They’ll be signed out and sign in again with the same password.', ok: 'Change role' })
-      .then(function (r) { if (r) staffUpdate(u.username, { role: role }, firstName(u.name) + ' is now ' + label); });
+    var r = ((state.staff && state.staff.roles) || []).filter(function (x) { return x.key === role; })[0];
+    var label = r ? r.label : role;
+    dialog({ title: 'Make ' + firstName(u.name) + ' ' + label + '?', html: roleHelp(role) + ' They’ll be signed out and sign in again with the same password.', ok: 'Change role' })
+      .then(function (ok) { if (ok) staffUpdate(u.username, { role: role }, firstName(u.name) + ' is now ' + label); });
   }
 
   /* =================================================================== boot */

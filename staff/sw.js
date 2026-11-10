@@ -1,7 +1,7 @@
 /* PRIME (Staff) service worker: caches the app shell so the icon opens instantly and works offline (read-only). */
 // Push notifications (OneSignal). Wrapped so the app still works offline or if the CDN is unreachable.
 try { importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js'); } catch (e) {}
-var CACHE = 'prime-staff-v9';
+var CACHE = 'prime-staff-v10';
 var SHELL = ['./', './index.html', './app.css', './app.js', './receipt.js', './xlsx.js', './rmimport.js', './qr-students.svg', './qr-staff.svg', './receipt-logo.jpg', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
 // Files come straight from the server (never the browser's own cache), so a new release is picked up at once.
