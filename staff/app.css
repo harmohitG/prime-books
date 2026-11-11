@@ -115,7 +115,8 @@ button.row:active, a.row:active { background: var(--fill); }
 .page { max-width: 640px; margin: 0 auto; padding: 0 16px calc(28px + var(--safe-b)); animation: fade .18s ease-out; }
 .page.sub { padding-top: 8px; }
 .large { font-size: 34px; font-weight: 700; letter-spacing: -.025em; margin: 4px 4px 12px; line-height: 1.1; }
-.practice-bar { position: sticky; top: 0; z-index: 30; background: #f5c400; color: #1b1b1b; font-size: 13.5px; text-align: center; padding: 6px 14px; border-bottom: 1px solid rgba(0,0,0,.08); }
+/* sits just under the nav bar (57px tall) so it never covers the menu or back button */
+.practice-bar { position: sticky; top: calc(57px + var(--safe-t)); z-index: 19; background: #f5c400; color: #1b1b1b; font-size: 13.5px; text-align: center; padding: 6px 14px; border-bottom: 1px solid rgba(0,0,0,.08); }
 .chip.test { background: #f5c400; color: #1b1b1b; }
 .row.blocked.ov { opacity: 1; } .row.blocked.ov .title::after { content: ' · needs override'; color: var(--amber); font-size: 12.5px; font-weight: 600; }
 .cb-num { font-variant-numeric: tabular-nums; font-weight: 700; } .cb-neg { color: var(--red); } .cb-pos { color: var(--accent); }
@@ -244,6 +245,7 @@ button.row:active, a.row:active { background: var(--fill); }
 .gpa-back { color: var(--red); font-weight: 600; }
 .dlg-label { display: block; margin-top: 12px; font-size: 13.5px; color: var(--muted); }
 .dlg-label input { margin-top: 4px; }
+.dlg-label select { margin-top: 0; }
 
 /* ---------- admin ---------- */
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -304,8 +306,9 @@ button.stat:active { background: var(--panel-2); }
 .dlg-body h2 { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
 .dlg-body p { font-size: 14.5px; margin: 0; color: var(--ink); line-height: 1.42; }
 .dlg-body .secret { font-family: var(--mono); font-size: 15px; background: var(--fill); border-radius: 10px; padding: 10px 12px; margin: 12px 0 2px; text-align: left; line-height: 1.6; overflow-wrap: anywhere; }
-.dlg-body input, .dlg-body textarea { width: 100%; margin-top: 12px; border: 1px solid var(--sep); border-radius: 9px; padding: 9px 11px; font-size: 16px; background: var(--panel); outline: none; }
-.dlg-body input:focus, .dlg-body textarea:focus { border-color: var(--accent); }
+.dlg-body input, .dlg-body textarea, .dlg-body select { width: 100%; margin-top: 12px; border: 1px solid var(--sep); border-radius: 9px; padding: 9px 11px; font-size: 16px; background: var(--panel); outline: none; }
+.dlg-body input:focus, .dlg-body textarea:focus, .dlg-body select:focus { border-color: var(--accent); }
+.dlg-body select { color: var(--ink); font-family: inherit; min-height: 42px; }
 .dlg-body .dlg-err { color: var(--red); font-size: 13.5px; margin-top: 8px; min-height: 0; }
 .dlg-btns { display: flex; border-top: 1px solid var(--sep); }
 .dlg-btns button { flex: 1; min-height: 46px; font-size: 17px; color: var(--accent); }

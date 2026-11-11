@@ -394,7 +394,7 @@
       if (can('cash_take')) { apps.push(['cash', 'Cash', ICON.cash, 'green', 0]); apps.push(['@cashbook', 'Cash book', ICON.sheet, 'teal', 0]); }
       if (can('receipts')) apps.push(['receipts', 'Receipts', ICON.receipt, 'rose', 0]);
       if (can('stock_view')) apps.push(['stock', 'Stock', ICON.stock, 'amber', lowN]);
-      if (can('gpa')) apps.push(['gpa', 'GPA books', ICON.gpa, 'teal', 0]);
+      // GPA books is hidden for now (feature kept in code): if (can('gpa')) apps.push(['gpa', 'GPA books', ICON.gpa, 'teal', 0]);
       if (can('qr')) apps.push(['qr', 'QR codes', ICON.qr, 'blue', 0]);
       if (can('admin')) apps.push(['admin', 'Admin', ICON.admin, 'violet', 0]);
       apps.push(['me', 'Me', ICON.me, 'grey', 0]);
