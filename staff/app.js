@@ -861,15 +861,21 @@
 
   /* =================================================================== Cash at the desk */
   function newCashState() { return { email: '', phone: '', name: '', lookup: null, looking: false, orderNo: null, sorrentino: false, palliative: false, matchKey: '', items: {}, tuition: false, tuitionAmt: '', tuitionNote: '', external: false, ovAmount: '', ovReason: '' }; }
-  function cashItemOn(i) { return !!state.cash.items[i.id] && (can('override') || !(i.wbStatus && i.wbStatus.status === 'included')); }
-  function cashItemBlocked(i) { return !!(i.wbStatus && i.wbStatus.status === 'included'); }
+  function cashItemOut(i) {
+    if (!i.stock) return false;
+    var L = state.cash && state.cash.lookup; if (!L) return false;
+    var s = (L.stock || []).filter(function (x) { return x.key === i.stock; })[0];
+    return !!(s && s.tracked && s.onHand <= 0);
+  }
+  function cashItemOn(i) { return !!state.cash.items[i.id] && (can('override') || !cashItemBlocked(i)); }
+  function cashItemBlocked(i) { return !!(i.wbStatus && i.wbStatus.status === 'included') || cashItemOut(i); }
   function bookBlocked(b) { return b.status === 'included' || b.out; }
   function bookOn(b) { var c = state.cash; return !!c[b.key] && (can('override') || !bookBlocked(b)); }
   // what the owner is overriding right now (blocked things ticked, or a changed total)
   function cashOverrides() {
     var c = state.cash, L = c.lookup, out = []; if (!L) return out;
     if (!c.orderNo) cashBooks().forEach(function (b) { if (c[b.key] && bookBlocked(b)) out.push(b.label + (b.status === 'included' ? ' (included)' : ' (out of stock)')); });
-    L.items.forEach(function (i) { if (c.items[i.id] && cashItemBlocked(i)) out.push(i.name + ' (included)'); });
+    L.items.forEach(function (i) { if (c.items[i.id] && cashItemBlocked(i)) out.push(i.name + (i.wbStatus && i.wbStatus.status === 'included' ? ' (included)' : ' (out of stock)')); });
     if (c.ovAmount !== '' && /^\d{1,6}(\.\d{1,2})?$/.test(String(c.ovAmount).trim())) out.push('total changed');
     return out;
   }
@@ -889,8 +895,8 @@
     var stock = {}; (L ? L.stock : []).forEach(function (i) { stock[i.key] = i; });
     var out = function (keys) { return keys.some(function (k) { return stock[k] && stock[k].tracked && stock[k].onHand <= 0; }); };
     return [
-      { key: 'sorrentino', label: 'Sorrentino textbook', price: prices.sorrentino, status: m ? m.books.sorrentino.status : 'owed', paidOn: m ? m.books.sorrentino.paidOn : '', out: out(['sorrentino']) },
-      { key: 'palliative', label: 'Palliative textbook + workbook', price: prices.palliative, status: m ? m.books.palliative.status : 'owed', paidOn: m ? m.books.palliative.paidOn : '', out: out(['pal_text', 'pal_work']) }
+      { key: 'sorrentino', label: 'Sorrentino textbook', price: prices.sorrentino, status: m ? m.books.sorrentino.status : 'owed', paidOn: m ? m.books.sorrentino.paidOn : '', out: out(['sorrentino']) }
+      // Palliative is now sold as two individual cash items (Textbook $100 / Workbook $70); see Settings > Cash items.
     ];
   }
   function cashAmount() {
@@ -902,6 +908,20 @@
     t += tuitionAmt();
     if (can('override') && c.ovAmount !== '' && /^\d{1,6}(\.\d{1,2})?$/.test(String(c.ovAmount).trim())) t = Number(String(c.ovAmount).trim());
     return Math.round(t * 100) / 100;
+  }
+  function cashBookRow_(b) {
+    var c = state.cash;
+    var blocked = b.status === 'included' || b.out, note = b.status === 'included' ? 'In their fees. Don’t take cash.' : b.out ? 'Out of stock. Don’t take cash.' : b.status === 'paid' ? 'Workbook shows paid' + (b.paidOn ? ' ' + b.paidOn : '') + '. Check before taking cash.' : '';
+    var ovOk = blocked && can('override');
+    return '<label class="row' + (blocked ? ' blocked' : '') + (ovOk ? ' ov' : '') + '"><input type="checkbox" data-book="' + b.key + '"' + (c[b.key] && (!blocked || ovOk) ? ' checked' : '') + (blocked && !ovOk ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(b.label) + '</span>' +
+      (note ? '<span class="sub' + (b.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(b.price) + '</span></label>';
+  }
+  function cashItemRow_(i) {
+    var c = state.cash, st = i.wbStatus || { status: '' };
+    var stOut = cashItemOut(i), blocked = st.status === 'included' || stOut, ovOk = blocked && can('override');
+    var note = st.status === 'included' ? 'In their fees. Don’t take cash.' : stOut ? 'Out of stock. Don’t take cash.' : st.status === 'paid' ? 'Workbook shows ' + (i.wbLabel || i.name) + ' paid' + (st.amount != null ? ' ' + money(st.amount) : '') + (st.paidOn ? ' ' + st.paidOn : '') + '. Check before taking cash.' : st.status === 'owed' ? 'Owed per workbook' : '';
+    return '<label class="row' + (blocked ? ' blocked' : '') + (ovOk ? ' ov' : '') + '"><input type="checkbox" data-item="' + esc(i.id) + '"' + (c.items[i.id] && (!blocked || ovOk) ? ' checked' : '') + (blocked && !ovOk ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(i.name) + '</span>' +
+      (note ? '<span class="sub' + (st.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(i.price) + '</span></label>';
   }
   function cashBodyHtml() {
     var c = state.cash, L = c.lookup, h = '';
@@ -917,24 +937,17 @@
         return '<label class="row"><input type="radio" name="cash-order" value="' + o.orderNo + '"' + (c.orderNo === o.orderNo ? ' checked' : '') + '><span class="grow"><span class="title">Take cash for order #' + o.orderNo + '</span><span class="sub' + (o.status === 'SENT' ? ' warn' : '') + '">' + esc(itemsText(o)) + (o.status === 'SENT' ? '. They said they already e-transferred: check the inbox before taking cash.' : '') + '</span></span><span class="value">' + money(o.amount) + '</span></label>';
       }).join('') + '<label class="row"><input type="radio" name="cash-order" value=""' + (!c.orderNo ? ' checked' : '') + '><span class="grow"><span class="title">Something else</span></span></label></div>';
     }
-    if (!c.orderNo) {
-      h += '<div class="group-head">Books</div><div class="group">' + cashBooks().map(function (b) {
-        var blocked = b.status === 'included' || b.out, note = b.status === 'included' ? 'In their fees. Don’t take cash.' : b.out ? 'Out of stock. Don’t take cash.' : b.status === 'paid' ? 'Workbook shows paid' + (b.paidOn ? ' ' + b.paidOn : '') + '. Check before taking cash.' : '';
-        var ovOk = blocked && can('override');
-        return '<label class="row' + (blocked ? ' blocked' : '') + (ovOk ? ' ov' : '') + '"><input type="checkbox" data-book="' + b.key + '"' + (c[b.key] && (!blocked || ovOk) ? ' checked' : '') + (blocked && !ovOk ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(b.label) + '</span>' +
-          (note ? '<span class="sub' + (b.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(b.price) + '</span></label>';
-      }).join('') + '</div>';
-    }
     // courses & exams from Settings > Cash items, grouped
     var groups = [], byG = {};
     L.items.forEach(function (i) { var g = i.group || 'Other'; if (!byG[g]) { byG[g] = []; groups.push(g); } byG[g].push(i); });
+    if (!c.orderNo) {
+      // one "Books" group: Sorrentino (workbook-aware) + any individual book items (Palliative Textbook / Workbook)
+      h += '<div class="group-head">Books</div><div class="group">' +
+        cashBooks().map(cashBookRow_).join('') + (byG['Books'] || []).map(cashItemRow_).join('') + '</div>';
+    }
     groups.forEach(function (g) {
-      h += '<div class="group-head">' + esc(g) + '</div><div class="group">' + byG[g].map(function (i) {
-        var st = i.wbStatus || { status: '' }, blocked = st.status === 'included', ovOk = blocked && can('override');
-        var note = blocked ? 'In their fees. Don’t take cash.' : st.status === 'paid' ? 'Workbook shows ' + (i.wbLabel || i.name) + ' paid' + (st.amount != null ? ' ' + money(st.amount) : '') + (st.paidOn ? ' ' + st.paidOn : '') + '. Check before taking cash.' : st.status === 'owed' ? 'Owed per workbook' : '';
-        return '<label class="row' + (blocked ? ' blocked' : '') + (ovOk ? ' ov' : '') + '"><input type="checkbox" data-item="' + esc(i.id) + '"' + (c.items[i.id] && (!blocked || ovOk) ? ' checked' : '') + (blocked && !ovOk ? ' disabled' : '') + '><span class="grow"><span class="title">' + esc(i.name) + '</span>' +
-          (note ? '<span class="sub' + (st.status === 'paid' ? ' warn' : '') + '">' + esc(note) + '</span>' : '') + '</span><span class="value">' + money(i.price) + '</span></label>';
-      }).join('') + '</div>';
+      if (g === 'Books' && !c.orderNo) return;   // rendered in the Books group above
+      h += '<div class="group-head">' + esc(g) + '</div><div class="group">' + byG[g].map(cashItemRow_).join('') + '</div>';
     });
     h += '<div class="group-head">Tuition</div><div class="group"><label class="row"><input type="checkbox" data-tuition="1"' + (c.tuition ? ' checked' : '') + '><span class="grow"><span class="title">Tuition payment</span><span class="sub">You type the amount. A note is required.</span></span></label>' +
       (c.tuition ? '<label class="cell"><span>Amount</span><input id="cash-tuition-amt" type="text" inputmode="decimal" autocomplete="off" value="' + esc(c.tuitionAmt) + '" placeholder="e.g. 500"></label>' +
@@ -1724,18 +1737,19 @@
         '<div class="row"><span class="grow"><span class="title">Opening float</span><span class="sub">' + (B.opening ? 'by ' + esc(B.opening.by) + ' · ' + esc(timeOf(B.opening.at)) + (B.opening.note ? ' · ' + esc(B.opening.note) : '') : 'Count the drawer when you open') + '</span></span>' +
           (B.opening ? '<span class="value cb-num">' + money(B.opening.amount) + '</span>' + (B.canFix && canAct ? '<button class="btn small" data-act="cb-open" style="margin-left:8px">Change</button>' : '') : (canAct ? '<button class="btn small primary" data-act="cb-open">Set</button>' : '')) + '</div>' +
         '<div class="row"><span class="grow"><span class="title">Cash in</span><span class="sub">' + B.inCount + (B.inCount === 1 ? ' payment' : ' payments') + ' taken at the desk (automatic)</span></span><span class="value cb-num cb-pos">' + cbMoney(B.inTotal, true) + '</span></div>' +
-        '<div class="row"><span class="grow"><span class="title">Cash out</span><span class="sub">' + B.outs.length + (B.outs.length === 1 ? ' entry' : ' entries') + '</span></span><span class="value cb-num' + (B.outTotal ? ' cb-neg' : '') + '">' + cbMoney(-B.outTotal, true) + '</span>' + (canAct && (!B.closing || B.canFix) ? '<button class="btn small" data-act="cb-out" style="margin-left:8px">Add</button>' : '') + '</div>' +
+        '<div class="row"><span class="grow"><span class="title">Cash out</span><span class="sub">' + B.outs.length + (B.outs.length === 1 ? ' entry' : ' entries') + '</span></span><span class="value cb-num' + (B.outTotal ? ' cb-neg' : '') + '">' + cbMoney(-B.outTotal, true) + '</span>' + (canAct && B.canOut && (!B.closing || B.canFix) ? '<button class="btn small" data-act="cb-out" style="margin-left:8px">Add</button>' : '') + '</div>' +
         '<div class="row"><span class="grow"><span class="title">Expected in drawer</span><span class="sub">float + in \u2212 out</span></span><span class="value cb-num">' + (B.expected === null ? '\u2013' : money(B.expected)) + '</span></div>' +
         '<div class="row"><span class="grow"><span class="title">Closing count</span><span class="sub">' + (B.closing ? 'by ' + esc(B.closing.by) + ' · ' + esc(timeOf(B.closing.at)) + (B.closing.note ? ' · ' + esc(B.closing.note) : '') : 'Count the drawer at the end of the day') + '</span></span>' +
           (B.closing ? '<span class="value cb-num">' + money(B.closing.amount) + '</span>' + (B.canFix && canAct ? '<button class="btn small" data-act="cb-close" style="margin-left:8px">Recount</button>' : '') : (canAct && B.opening ? '<button class="btn small primary" data-act="cb-close">Count</button>' : '')) + '</div>' +
         (B.difference !== null ? '<div class="row"><span class="grow"><span class="title">Difference</span><span class="sub">' + (B.difference === 0 ? 'Balanced' : B.difference < 0 ? 'Short' : 'Over') + '</span></span><span class="value cb-num ' + (B.difference < 0 ? 'cb-neg' : B.difference > 0 ? 'cb-pos' : '') + '">' + cbMoney(B.difference, true) + '</span></div>' : '') +
         '</div>';
       if (B.outs.length) h += '<div class="group-head">Cash out</div><div class="group">' + B.outs.map(function (o) {
-        return '<div class="row"><span class="grow"><span class="title">' + esc(o.note) + '</span><span class="sub">' + esc(o.by) + ' · ' + esc(timeOf(o.at)) + '</span></span><span class="value cb-num cb-neg">\u2212' + money(o.amount) + '</span>' + (B.canFix ? '<button class="link" data-act="cb-remove" data-id="' + esc(o.id) + '" style="margin-left:10px">Remove</button>' : '') + '</div>';
+        return '<div class="row"><span class="grow"><span class="title">' + esc(o.catLabel || o.note) + '</span><span class="sub">' + (o.catLabel && o.note ? esc(o.note) + ' · ' : '') + esc(o.by) + ' · ' + esc(timeOf(o.at)) + '</span></span><span class="value cb-num cb-neg">\u2212' + money(o.amount) + '</span>' + (B.canFix ? '<button class="link" data-act="cb-remove" data-id="' + esc(o.id) + '" style="margin-left:10px">Remove</button>' : '') + '</div>';
       }).join('') + '</div>';
       if (B.ins.length) h += '<div class="group-head">Cash in</div><div class="group">' + B.ins.map(function (x) {
         return '<div class="row"><span class="grow"><span class="title">' + esc(x.cashId) + (x.name ? ' · ' + esc(titleCase(x.name)) : '') + '</span><span class="sub">' + (x.summary ? esc(x.summary) + ' · ' : '') + 'by ' + esc(firstName(x.by)) + ' · ' + esc(timeOf(x.at)) + '</span></span><span class="value cb-num">' + money(x.amount) + '</span></div>';
       }).join('') + '</div>';
+      if (B.canAnyDay) h += '<button class="btn block" data-act="cb-print" style="margin-top:14px">' + ICON.receipt + 'Print / share this day</button>';
       h += '<p class="group-foot">Cash in comes from the cash records automatically. Voided and TEST records aren’t included.' + (B.canAnyDay ? '' : ' You can see today and yesterday.') + '</p>';
       return seg + h;
     },
@@ -1785,8 +1799,20 @@
       .then(function (r) { if (r) cbDo('cashBookOpen', [r.amount, r.note || ''], 'Float set'); });
   }
   function cashBookOutAct() {
-    cbAmountDialog('Cash out', 'Money taken from the drawer.', 'Add', 'amount', 'e.g. 20', true, true)
-      .then(function (r) { if (r) cbDo('cashBookOut', [r.amount, r.note], 'Cash out added'); });
+    var cats = (state.cashBook && state.cashBook.outCats) || [];
+    dialog({ title: 'Cash out', html: 'Money taken from the drawer.', ok: 'Add',
+      inputs: [
+        { key: 'amount', type: 'number', placeholder: 'e.g. 20' },
+        { key: 'cat', type: 'select', placeholder: 'What was it for?', options: cats.map(function (c) { return { value: c.id, label: c.label }; }) },
+        { key: 'note', placeholder: 'Note — who / why (required)', maxlength: 120 }
+      ],
+      validate: function (v) {
+        if (!/^\d{1,6}(\.\d{1,2})?$/.test(String(v.amount || '').trim())) return 'Enter an amount like 20 or 20.50.';
+        if (!v.cat) return 'Pick what the money was for.';
+        if (!(v.note && v.note.trim().length >= 3)) return 'Say what the cash was for.';
+        return '';
+      }
+    }).then(function (r) { if (r) cbDo('cashBookOut', [r.amount, r.note, r.cat], 'Cash out added'); });
   }
   function cashBookCloseAct() {
     var B = state.cashBook, fix = !!B.closing;
@@ -1796,6 +1822,17 @@
   function cashBookRemoveAct(id) {
     dialog({ title: 'Remove this entry?', html: 'Owner override. It stays in the sheet marked removed.', ok: 'Remove', destructive: true, inputs: [{ key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }], validate: function (v) { return v.reason && v.reason.trim().length >= 3 ? '' : 'Say why.'; } })
       .then(function (r) { if (!r) return; sapi('cashBookRemove', [id, r.reason]).then(function (B) { state.cashBook = B; rerender(); toast('Removed'); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+  }
+  function cashBookPrint(btn) {
+    var B = state.cashBook; if (!B) return;
+    var label = btn ? btn.innerHTML : ''; if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>'; }
+    return receiptLogo().then(function (logo) {
+      if (!window.PrimeReceipt || !window.PrimeReceipt.cashbookPdf) throw new Error('The print tool didn’t load. Close the app and open it again.');
+      var p = { blob: new Blob([window.PrimeReceipt.cashbookPdf(B, logo)], { type: 'application/pdf' }), name: window.PrimeReceipt.cashbookFileName(B), count: 1 };
+      return dialog({ title: 'Daily cash flow', html: 'The full log for ' + esc(B.date === B.today ? 'today' : B.date) + ': float, cash in, cash out and the count.', ok: 'Print / share', cancel: 'Close' })
+        .then(function (ok) { if (ok) sharePdf(p); });
+    }).catch(function (e) { if (!e.signedOut) toast(e.message || String(e)); })
+      .then(function () { if (btn) { btn.disabled = false; btn.innerHTML = label; } });
   }
 
   /* ---------- admin: cash items (what can be paid for in cash, and the price) ---------- */
@@ -2229,6 +2266,7 @@
       var inputs = (o.inputs || []).map(function (f, i) {
         var attrs = ' data-key="' + f.key + '" placeholder="' + esc(f.placeholder || '') + '"' + (f.maxlength ? ' maxlength="' + f.maxlength + '"' : '');
         if (f.type === 'date') return '<label class="dlg-label">' + esc(f.label || '') + '<input type="date"' + attrs + (f.max ? ' max="' + esc(f.max) + '"' : '') + ' value="' + esc(f.value || '') + '"' + (i === 0 ? ' data-first="1"' : '') + '></label>';
+        if (f.type === 'select') return '<label class="dlg-label">' + esc(f.label || '') + '<select data-key="' + f.key + '"' + (i === 0 ? ' data-first="1"' : '') + '>' + (f.placeholder ? '<option value="">' + esc(f.placeholder) + '</option>' : '') + (f.options || []).map(function (op) { return '<option value="' + esc(op.value) + '"' + (f.value === op.value ? ' selected' : '') + '>' + esc(op.label) + '</option>'; }).join('') + '</select></label>';
         return f.textarea ? '<textarea rows="3"' + attrs + '>' + esc(f.value || '') + '</textarea>'
           : '<input type="' + (f.type === 'number' ? 'text' : 'text') + '"' + (f.type === 'number' ? ' inputmode="numeric" pattern="[0-9]*"' : '') + attrs + ' value="' + esc(f.value || '') + '"' + (i === 0 ? ' data-first="1"' : '') + '>';
       }).join('');
@@ -2338,6 +2376,7 @@
         case 'cb-out': return cashBookOutAct();
         case 'cb-close': return cashBookCloseAct();
         case 'cb-remove': return cashBookRemoveAct(b.dataset.id);
+        case 'cb-print': return cashBookPrint(b);
         case 'cash-pdf': if (b.closest('#dlg')) closeDialog(); return cashPdfAct(b.dataset.cash, b.closest('#dlg') ? null : b);
         case 'qr-full': return qrFull(b.dataset.qr);
         case 'qr-close': { var qf = $('qrfs'); if (qf) qf.remove(); return; }

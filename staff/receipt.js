@@ -27,7 +27,7 @@
 
   /** Text to WinAnsi bytes (Latin-1 range kept; curly quotes/dashes mapped; anything else becomes '?'). */
   function ansi(s) {
-    s = String(s == null ? '' : s).replace(/[‘’‛]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...').replace(/[\r\n\t]+/g, ' ');
+    s = String(s == null ? '' : s).replace(/[‘’‛]/g, "'").replace(/[“”]/g, '"').replace(/[–—−]/g, '-').replace(/…/g, '...').replace(/[\r\n\t]+/g, ' ');
     var out = '';
     for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); out += (c >= 32 && c <= 126) || (c >= 160 && c <= 255) ? s.charAt(i) : '?'; }
     return out;
@@ -259,6 +259,82 @@
     catch (e) { return String(iso || '').slice(0, 10); }
   }
 
+  /**
+   * The Daily Cash Flow log — one printable page per day (US Letter), continuing onto more pages when a day is busy.
+   * day = the cash book view for one date: { date, opening|null, closing|null, ins[], outs[], inCount, inTotal, outTotal,
+   *       expected, counted, difference }. Lays out a summary box, every cash-out (with its category) and every cash-in,
+   *       then lines for Prepared by / Checked by.
+   */
+  function cashbookPdf(day, logo) {
+    var L = 40, R = 572, BOT = 752;
+    var pages = [], D, y;
+    function flush() { if (D) pages.push(D.ops.join('\n')); }
+    function start(cont) {
+      flush(); D = drawer();
+      D.header('Daily Cash Flow Record', 'new');
+      D.text(longDate(day.date) + (cont ? '   (continued)' : ''), 306, 104, 'F2', 11, 'center');
+      y = 122;
+    }
+    function room(h) { if (y + h > BOT) start(true); }
+    function sect(t) { room(40); y += 10; D.text(t, L, y, 'F2', 11, 'left'); y += 5; D.line(L, y, R, y, 0.8); y += 18; }
+    function entry(title, sub, amount) {
+      room(31);
+      D.text(title, L + 6, y, 'F2', 10, 'left', 320);
+      D.text(amount, R - 6, y, 'F2', 10, 'right', 130);
+      if (sub) D.text(sub, L + 6, y + 12, 'F1', 8, 'left', 450, 0.35);
+      y += 31; D.line(L, y - 9, R, y - 9, 0.3, true);
+    }
+    start(false);
+
+    // summary box
+    var sum = [
+      ['Opening float', day.opening ? money(day.opening.amount) : 'Not opened'],
+      ['Cash in  (' + day.inCount + (day.inCount === 1 ? ' payment)' : ' payments)'), '+' + money(day.inTotal)],
+      ['Cash out  (' + day.outs.length + (day.outs.length === 1 ? ' entry)' : ' entries)'), day.outTotal ? '−' + money(day.outTotal) : money(0)],
+      ['Expected in drawer', day.expected === null ? '–' : money(day.expected)],
+      ['Closing count', day.closing ? money(day.closing.amount) : 'Not counted'],
+      ['Difference', day.difference === null ? '–' : (day.difference === 0 ? money(0) + '   balanced' : (day.difference < 0 ? '−' + money(-day.difference) + '   short' : '+' + money(day.difference) + '   over'))]
+    ];
+    var boxTop = y - 2;
+    sum.forEach(function (rw, i) {
+      var bold = i === 3 || i === 5;
+      D.text(rw[0], L + 8, y + 11, bold ? 'F2' : 'F1', 10, 'left', 360);
+      D.text(rw[1], R - 8, y + 11, 'F2', 10, 'right', 170);
+      y += 22;
+      if (i < sum.length - 1) D.line(L, y - 5, R, y - 5, 0.4, true);
+    });
+    D.rect(L, boxTop, R - L, y - boxTop, 0.9);
+    y += 4;
+
+    sect('Cash out');
+    if (!day.outs.length) { D.text('None.', L + 6, y, 'F1', 10, 'left', 400, 0.4); y += 20; }
+    day.outs.forEach(function (o) {
+      entry(o.catLabel || 'Cash out', (o.note ? o.note + '   ·   ' : '') + (o.by || '') + '   ·   ' + torontoParts(o.at).time, '−' + money(o.amount));
+    });
+    y += 6;
+
+    sect('Cash in');
+    if (!day.ins.length) { D.text('None.', L + 6, y, 'F1', 10, 'left', 400, 0.4); y += 20; }
+    day.ins.forEach(function (x) {
+      entry(x.cashId + (x.name ? '   ·   ' + titleCase(x.name) : ''), (x.summary ? x.summary + '   ·   ' : '') + (x.by || '') + '   ·   ' + torontoParts(x.at).time, money(x.amount));
+    });
+
+    // prepared by / checked by
+    room(72); y += 20;
+    var half = (R - L) / 2;
+    [['Prepared by', day.opening ? day.opening.by : ''], ['Checked by', '']].forEach(function (b, k) {
+      var x0 = L + k * half;
+      D.line(x0, y + 26, x0 + half - 28, y + 26, 0.6);
+      D.text(b[0], x0, y + 39, 'F2', 9, 'left');
+      if (b[1]) D.text(b[1], x0, y + 20, 'F1', 9, 'left', half - 32);
+    });
+    D.text('E&OE', R, y + 39, 'F1', 8, 'right');
+
+    flush();
+    return build(pages, { Im1: { kind: 'jpeg', bytes: asBytes(logo) } }, 'Daily Cash Flow ' + day.date);
+  }
+  function cashbookFileName(day) { return 'CashFlow_' + String(day.date || '').replace(/[^0-9]/g, '') + '.pdf'; }
+
   /* ---------- PNG signatures -> PDF image (works in browsers, the Cloudflare worker and Node; needs (De)CompressionStream) ---------- */
   function streamThrough(u8, stream) {
     var blobRes = new Response(new Blob([u8]).stream().pipeThrough(stream));
@@ -310,7 +386,7 @@
     return safe(c.cashId) + '_' + safe(titleCase(c.workbookName || c.name)) + '_' + safe(torontoParts(c.at).date) + (c.status === 'void' ? '_VOID' : '') + '.pdf';
   }
 
-  var api = { pdf: pdf, cashPdf: cashPdf, pngImage: pngImage, cashFileName: cashFileName, money: money, longDate: longDate, fileName: function (rs) {
+  var api = { pdf: pdf, cashPdf: cashPdf, cashbookPdf: cashbookPdf, cashbookFileName: cashbookFileName, pngImage: pngImage, cashFileName: cashFileName, money: money, longDate: longDate, fileName: function (rs) {
     var r = rs[0], safe = function (s) { return String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''); };
     return rs.length === 1 ? (r.studentId ? safe(r.studentId) + '_' : '') + safe(r.name) + '_' + safe(r.no) + '.pdf' : 'Receipts_' + rs.length + '_' + safe(r.date) + '.pdf';
   } };
