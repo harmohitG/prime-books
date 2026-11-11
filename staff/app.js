@@ -1723,7 +1723,7 @@
       var seg = '';
       if (can('cash_report')) {
         var v = state.cbView || 'day';
-        seg = '<div class="seg" style="margin-bottom:12px">' + [['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(function (s) { return '<button data-cbview="' + s[0] + '" class="' + (v === s[0] ? 'on' : '') + '">' + s[1] + '</button>'; }).join('') + '</div>';
+        seg = '<div class="seg" style="margin-bottom:12px">' + [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['custom', 'Custom']].map(function (s) { return '<button data-cbview="' + s[0] + '" class="' + (v === s[0] ? 'on' : '') + '">' + s[1] + '</button>'; }).join('') + '</div>';
         if (v !== 'day') return seg + cashBookSummaryHtml(v);
       }
       var B = state.cashBook; if (!B || B.date !== (c.params.date || B.date)) return seg + loadingHtml();
@@ -1757,6 +1757,11 @@
   };
   function cbRange(v) {
     var now = new Date(), t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (v === 'custom') {
+      var cc = state.cbCustom || (state.cbCustom = { from: localDate(new Date(t0.getFullYear(), t0.getMonth(), 1)), to: localDate(t0) });
+      var nice = function (d) { return new Date(d + 'T12:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }); };
+      return { from: cc.from, to: cc.to, label: cc.from === cc.to ? nice(cc.from) : nice(cc.from) + ' to ' + nice(cc.to) };
+    }
     if (v === 'week') { var dow = (t0.getDay() + 6) % 7; var mon = new Date(t0.getTime() - dow * 86400000); return { from: localDate(mon), to: localDate(t0), label: 'This week (from Mon ' + mon.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) + ')' }; }
     return { from: localDate(new Date(t0.getFullYear(), t0.getMonth(), 1)), to: localDate(t0), label: t0.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' }) };
   }
@@ -1767,6 +1772,7 @@
   function cashBookSummaryHtml(v) {
     var S = state.cbSum, r = cbRange(v);
     var h = '<div class="cash-sum"><div class="s-num">' + (S ? money(S.inTotal) : '\u2013') + '</div><div class="s-label">' + esc(r.label) + (S ? ' · ' + S.inCount + (S.inCount === 1 ? ' payment' : ' payments') + ' in · ' + money(S.outTotal) + ' out' + (S.daysClosed ? ' · ' + S.daysClosed + (S.daysClosed === 1 ? ' day closed' : ' days closed') + ', ' + (S.differenceTotal === 0 ? 'balanced' : (S.differenceTotal < 0 ? 'short ' : 'over ') + money(Math.abs(S.differenceTotal))) : '') : '') + '</div></div>';
+    if (v === 'custom') h = '<div class="group"><label class="cell"><span>From</span><input id="cb-from" type="date" max="' + esc(localDate(new Date())) + '" value="' + esc(r.from) + '"></label><label class="cell"><span>To</span><input id="cb-to" type="date" max="' + esc(localDate(new Date())) + '" value="' + esc(r.to) + '"></label></div><button class="btn block" data-act="cb-custom" style="margin:12px 0">Show</button>' + h;
     h += '<div id="cb-sum">';
     if (!S) return h + loadingHtml() + '</div>';
     if (!S.days.length) return h + '<div class="empty">' + ICON.check + '<strong>Nothing yet</strong>Days with cash show up here.</div></div>';
@@ -1775,7 +1781,8 @@
       var st = b.difference === null ? (b.opening === null ? 'not opened' : 'open, not counted') : (b.difference === 0 ? 'balanced' : (b.difference < 0 ? 'short ' : 'over ') + money(Math.abs(b.difference)));
       return '<button class="row" data-act="cb-day" data-date="' + b.date + '"><span class="grow"><span class="title">' + esc(lab) + '</span><span class="sub">' + (b.opening === null ? '' : 'float ' + money(b.opening) + ' · ') + b.inCount + ' in' + (b.outCount ? ' · ' + b.outCount + ' out' : '') + ' · ' + esc(st) + '</span></span><span class="value cb-num ' + (b.difference !== null && b.difference < 0 ? 'cb-neg' : '') + '">' + money(b.inTotal) + '</span><span class="chev">' + ICON.chev + '</span></button>';
     }).join('') + '</div>';
-    return h + '</div><p class="group-foot">Amount shown is cash in for the day. Tap a day to open its page.</p>';
+    h += '<button class="btn block" data-act="cb-print-range" style="margin-top:14px">' + ICON.receipt + 'Print / share this report</button>';
+    return h + '</div><p class="group-foot">Amount shown is cash in for the day. Tap a day to open its page. The report can be a summary (one line per day) or full detail (every payment and cash-out).</p>';
   }
   function loadCashBook(date) {
     return sapi('cashBookGet', [date || '']).then(function (B) { state.cashBook = B; var cur = current(); if (cur.page === 'cashBook') { cur.params.date = B.date; rerender(); } })
@@ -1822,6 +1829,31 @@
   function cashBookRemoveAct(id) {
     dialog({ title: 'Remove this entry?', html: 'Owner override. It stays in the sheet marked removed.', ok: 'Remove', destructive: true, inputs: [{ key: 'reason', placeholder: 'Why? (required)', maxlength: 200 }], validate: function (v) { return v.reason && v.reason.trim().length >= 3 ? '' : 'Say why.'; } })
       .then(function (r) { if (!r) return; sapi('cashBookRemove', [id, r.reason]).then(function (B) { state.cashBook = B; rerender(); toast('Removed'); }).catch(function (e) { if (!e.signedOut) toast(e.message); }); });
+  }
+  function cashBookCustomAct() {
+    var f = ($('cb-from') || {}).value || '', t = ($('cb-to') || {}).value || '';
+    if (!f || !t) return toast('Pick both dates.');
+    if (f > t) return toast('The From date is after the To date.');
+    if (new Date(t + 'T00:00:00Z') - new Date(f + 'T00:00:00Z') > 366 * 86400000) return toast('Pick a range of one year or less.');
+    state.cbCustom = { from: f, to: t }; state.cbSum = null; rerender(); loadCashBookSummary();
+  }
+  /** Print the Week / Month / Custom view: a summary (one line per day) or full detail (every day's page behind it). */
+  function cashBookRangePrint(btn) {
+    var S = state.cbSum, r = cbRange(state.cbView); if (!S) return;
+    return dialog({ title: 'Print cash flow report', html: esc(r.label) + '<br>Summary is one line per day with totals. Full detail adds a page for every day with each payment and cash-out.', ok: 'Make report', cancel: 'Close',
+      inputs: [{ key: 'kind', type: 'select', value: 'summary', options: [{ value: 'summary', label: 'Summary' }, { value: 'detail', label: 'Full detail' }] }]
+    }).then(function (v) {
+      if (!v) return;
+      var detail = v.kind === 'detail';
+      var label = btn ? btn.innerHTML : ''; if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner sm"></span>'; }
+      return Promise.all([receiptLogo(), detail ? sapi('cashBookSummary', [S.from, S.to, true]) : S]).then(function (x) {
+        if (!window.PrimeReceipt || !window.PrimeReceipt.cashbookRangePdf) throw new Error('The print tool didn’t load. Close the app and open it again.');
+        var data = x[1], p = { blob: new Blob([window.PrimeReceipt.cashbookRangePdf(data, x[0], { detail: detail })], { type: 'application/pdf' }), name: window.PrimeReceipt.cashbookRangeFileName(data, detail), count: 1 };
+        return dialog({ title: 'Report ready', html: (detail ? 'Full detail' : 'Summary') + ' · ' + esc(r.label) + '<br>' + data.days.length + (data.days.length === 1 ? ' day' : ' days') + ' with cash.', ok: 'Print / share', cancel: 'Close' })
+          .then(function (ok) { if (ok) sharePdf(p); });
+      }).catch(function (e) { if (!e.signedOut) toast(e.message || String(e)); })
+        .then(function () { if (btn) { btn.disabled = false; btn.innerHTML = label; } });
+    });
   }
   function cashBookPrint(btn) {
     var B = state.cashBook; if (!B) return;
@@ -2377,6 +2409,8 @@
         case 'cb-close': return cashBookCloseAct();
         case 'cb-remove': return cashBookRemoveAct(b.dataset.id);
         case 'cb-print': return cashBookPrint(b);
+        case 'cb-custom': return cashBookCustomAct();
+        case 'cb-print-range': return cashBookRangePrint(b);
         case 'cash-pdf': if (b.closest('#dlg')) closeDialog(); return cashPdfAct(b.dataset.cash, b.closest('#dlg') ? null : b);
         case 'qr-full': return qrFull(b.dataset.qr);
         case 'qr-close': { var qf = $('qrfs'); if (qf) qf.remove(); return; }

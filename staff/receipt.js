@@ -266,6 +266,10 @@
    *       then lines for Prepared by / Checked by.
    */
   function cashbookPdf(day, logo) {
+    return build(cashbookDayPages_(day), { Im1: { kind: 'jpeg', bytes: asBytes(logo) } }, 'Daily Cash Flow ' + day.date);
+  }
+  /** The drawn pages for one day (used on its own and inside the range report's full detail). */
+  function cashbookDayPages_(day) {
     var L = 40, R = 572, BOT = 752;
     var pages = [], D, y;
     function flush() { if (D) pages.push(D.ops.join('\n')); }
@@ -331,7 +335,105 @@
     D.text('E&OE', R, y + 39, 'F1', 8, 'right');
 
     flush();
-    return build(pages, { Im1: { kind: 'jpeg', bytes: asBytes(logo) } }, 'Daily Cash Flow ' + day.date);
+    return pages;
+  }
+
+  /**
+   * Cash Flow Report for a date range (up to a year). S = cashBookSummary(from, to[, detail]):
+   * { from, to, days[], inTotal, inCount, outTotal, outCount, differenceTotal, daysClosed, daysOpen, byCat[], views? }.
+   * Always: totals, cash-out by category, one line per day. With opts.detail and S.views: every day's full page follows.
+   */
+  function cashbookRangePdf(S, logo, opts) {
+    opts = opts || {};
+    var L = 40, R = 572, BOT = 752;
+    var pages = [], D, y;
+    var range = S.from === S.to ? longDate(S.from) : longDate(S.from) + '  to  ' + longDate(S.to);
+    function signed(n) { return n === null || n === undefined ? '–' : n === 0 ? money(0) : n < 0 ? '−' + money(-n) : '+' + money(n); }
+    function flush() { if (D) pages.push(D.ops.join('\n')); }
+    function start(cont) {
+      flush(); D = drawer();
+      D.header('Cash Flow Report', 'new');
+      D.text(range + (cont ? '   (continued)' : ''), 306, 104, 'F2', 11, 'center');
+      y = 122;
+    }
+    function room(h) { if (y + h > BOT) { start(true); return true; } return false; }
+    function sect(t) { room(46); y += 10; D.text(t, L, y, 'F2', 11, 'left'); y += 5; D.line(L, y, R, y, 0.8); y += 18; }
+    start(false);
+
+    // totals box
+    var net = Math.round((S.inTotal - S.outTotal) * 100) / 100, nDays = S.days.length;
+    var sum = [
+      ['Cash in  (' + S.inCount + (S.inCount === 1 ? ' payment)' : ' payments)'), '+' + money(S.inTotal)],
+      ['Cash out  (' + (S.outCount || 0) + ((S.outCount || 0) === 1 ? ' entry)' : ' entries)'), S.outTotal ? '−' + money(S.outTotal) : money(0)],
+      ['Net cash  (in less out)', signed(net)],
+      ['Days with cash', nDays + '   (' + S.daysClosed + ' counted' + (S.daysOpen ? ', ' + S.daysOpen + ' opened but not counted' : '') + ')'],
+      ['Over / short across counted days', S.daysClosed ? (S.differenceTotal === 0 ? money(0) + '   balanced' : S.differenceTotal < 0 ? '−' + money(-S.differenceTotal) + '   short' : '+' + money(S.differenceTotal) + '   over') : '–']
+    ];
+    var boxTop = y - 2;
+    sum.forEach(function (rw, i) {
+      var bold = i === 2 || i === 4;
+      D.text(rw[0], L + 8, y + 11, bold ? 'F2' : 'F1', 10, 'left', 300);
+      D.text(rw[1], R - 8, y + 11, 'F2', 10, 'right', 240);
+      y += 22;
+      if (i < sum.length - 1) D.line(L, y - 5, R, y - 5, 0.4, true);
+    });
+    D.rect(L, boxTop, R - L, y - boxTop, 0.9);
+    y += 4;
+
+    sect('Cash out by category');
+    if (!(S.byCat || []).length) { D.text('No cash was taken out.', L + 6, y, 'F1', 10, 'left', 400, 0.4); y += 18; }
+    (S.byCat || []).forEach(function (c) {
+      room(20);
+      D.text(c.label + '   (' + c.count + ')', L + 6, y, 'F1', 10, 'left', 360);
+      D.text('−' + money(c.total), R - 6, y, 'F2', 10, 'right', 130);
+      y += 18; D.line(L, y - 11, R, y - 11, 0.3, true);
+    });
+    y += 4;
+
+    // one line per day
+    var cols = [['Float', 232], ['Cash in', 302], ['Cash out', 372], ['Expected', 442], ['Counted', 508], ['Difference', R - 6]];
+    function head() {
+      D.text('Date', L + 6, y, 'F2', 9, 'left');
+      cols.forEach(function (c) { D.text(c[0], c[1], y, 'F2', 9, 'right'); });
+      y += 6; D.line(L, y, R, y, 0.6); y += 14;
+    }
+    sect('Day by day');
+    if (!nDays) { D.text('No cash on any day in this range.', L + 6, y, 'F1', 10, 'left', 400, 0.4); y += 18; }
+    else {
+      head();
+      S.days.forEach(function (b) {
+        if (room(16)) { y += 6; head(); }
+        D.text(longDate(b.date), L + 6, y, 'F1', 9, 'left', 150);
+        var vals = [b.opening === null ? '–' : money(b.opening), money(b.inTotal), b.outTotal ? '−' + money(b.outTotal) : money(0), b.expected === null ? '–' : money(b.expected), b.counted === null ? '–' : money(b.counted), signed(b.difference)];
+        cols.forEach(function (c, i) { D.text(vals[i], c[1], y, i === 5 && b.difference ? 'F2' : 'F1', 9, 'right'); });
+        y += 16; D.line(L, y - 11, R, y - 11, 0.25, true);
+      });
+      if (room(22)) { y += 6; head(); }
+      y += 4; D.line(L, y - 12, R, y - 12, 0.6);
+      D.text('Total', L + 6, y, 'F2', 9, 'left');
+      D.text(money(S.inTotal), cols[1][1], y, 'F2', 9, 'right');
+      D.text(S.outTotal ? '−' + money(S.outTotal) : money(0), cols[2][1], y, 'F2', 9, 'right');
+      D.text(S.daysClosed ? signed(S.differenceTotal) : '–', cols[5][1], y, 'F2', 9, 'right');
+      y += 14;
+    }
+
+    // prepared by / checked by
+    room(72); y += 22;
+    var half = (R - L) / 2;
+    ['Prepared by', 'Checked by'].forEach(function (b, k) {
+      var x0 = L + k * half;
+      D.line(x0, y + 26, x0 + half - 28, y + 26, 0.6);
+      D.text(b, x0, y + 39, 'F2', 9, 'left');
+    });
+    D.text('E&OE', R, y + 39, 'F1', 8, 'right');
+    flush();
+
+    if (opts.detail) (S.views || []).forEach(function (v) { pages = pages.concat(cashbookDayPages_(v)); });
+    return build(pages, { Im1: { kind: 'jpeg', bytes: asBytes(logo) } }, 'Cash Flow Report ' + S.from + ' to ' + S.to);
+  }
+  function cashbookRangeFileName(S, detail) {
+    var c = function (d) { return String(d || '').replace(/[^0-9]/g, ''); };
+    return 'CashFlow_' + c(S.from) + (S.to !== S.from ? '-' + c(S.to) : '') + (detail ? '_detail' : '_summary') + '.pdf';
   }
   function cashbookFileName(day) { return 'CashFlow_' + String(day.date || '').replace(/[^0-9]/g, '') + '.pdf'; }
 
@@ -386,7 +488,7 @@
     return safe(c.cashId) + '_' + safe(titleCase(c.workbookName || c.name)) + '_' + safe(torontoParts(c.at).date) + (c.status === 'void' ? '_VOID' : '') + '.pdf';
   }
 
-  var api = { pdf: pdf, cashPdf: cashPdf, cashbookPdf: cashbookPdf, cashbookFileName: cashbookFileName, pngImage: pngImage, cashFileName: cashFileName, money: money, longDate: longDate, fileName: function (rs) {
+  var api = { pdf: pdf, cashPdf: cashPdf, cashbookPdf: cashbookPdf, cashbookFileName: cashbookFileName, cashbookRangePdf: cashbookRangePdf, cashbookRangeFileName: cashbookRangeFileName, pngImage: pngImage, cashFileName: cashFileName, money: money, longDate: longDate, fileName: function (rs) {
     var r = rs[0], safe = function (s) { return String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''); };
     return rs.length === 1 ? (r.studentId ? safe(r.studentId) + '_' : '') + safe(r.name) + '_' + safe(r.no) + '.pdf' : 'Receipts_' + rs.length + '_' + safe(r.date) + '.pdf';
   } };
