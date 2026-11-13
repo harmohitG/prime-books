@@ -860,7 +860,7 @@
   window.addEventListener('beforeunload', function (e) { if (Object.keys(state.gpa.pend).some(function (k) { return gpaCount(state.gpa.pend[k]); })) { e.preventDefault(); e.returnValue = ''; } });
 
   /* =================================================================== Cash at the desk */
-  function newCashState() { return { email: '', phone: '', name: '', lookup: null, looking: false, orderNo: null, sorrentino: false, palliative: false, matchKey: '', items: {}, tuition: false, tuitionAmt: '', tuitionNote: '', external: false, ovAmount: '', ovReason: '' }; }
+  function newCashState() { return { email: '', phone: '', name: '', lookup: null, looking: false, orderNo: null, sorrentino: false, palliative: false, matchKey: '', items: {}, tuition: false, tuitionAmt: '', tuitionNote: '', external: false, ovAmount: '', ovReason: '', mode: 'student', agent: '', agentAmt: '', agentNote: '' }; }
   function cashItemOut(i) {
     if (!i.stock) return false;
     var L = state.cash && state.cash.lookup; if (!L) return false;
@@ -1079,19 +1079,26 @@
   PAGES.cashNew = {
     title: 'Cash payment',
     html: function () {
-      var c = state.cash;
-      return '<p class="lead">Find the student, tick what they’re paying for, both sign. Books are handed over right away.</p>' +
-        '<div class="group-head">Student</div><div class="group">' +
+      var c = state.cash, mode = c.mode || 'student';
+      var seg = '<div class="group-head">Who is paying?</div><div class="seg" style="margin-bottom:14px">' + [['student', 'Student'], ['external', 'Not a student'], ['agent', 'Agent']].map(function (m) { return '<button data-cashmode="' + m[0] + '" class="' + (mode === m[0] ? 'on' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
+      if (mode === 'agent') return seg + cashAgentHtml();
+      return seg + '<p class="lead">' + (mode === 'external' ? 'Someone who isn’t a student, or isn’t in the system yet. Tick what they’re paying for, both sign.' : 'Find the student, tick what they’re paying for, both sign. Books are handed over right away.') + '</p>' +
+        '<div class="group-head">' + (mode === 'external' ? 'Their details' : 'Student') + '</div><div class="group">' +
         '<label class="cell"><span>Email</span><input id="cash-email" type="email" inputmode="email" autocapitalize="none" autocomplete="off" value="' + esc(c.email) + '" placeholder="The email they gave the college"></label>' +
         '<label class="cell"><span>Phone</span><input id="cash-phone" type="tel" inputmode="tel" autocomplete="off" value="' + esc(c.phone) + '" placeholder="10 digits"></label></div>' +
-        '<p class="group-foot">Both are needed for the record. We look them up in the accounting workbook.</p>' +
-        '<p id="cash-find-error" class="error" hidden></p><button id="cash-find" class="btn block" data-act="cash-find">' + (c.lookup && !c.lookup.external ? 'Look up again' : 'Find student') + '</button>' +
-        '<button id="cash-external" class="btn block" data-act="cash-external" style="margin-top:8px">' + (c.lookup && c.lookup.external ? 'Not a student · change' : 'Not a student / not in the system yet') + '</button>' +
+        '<p class="group-foot">' + (mode === 'external' ? 'Both are needed so the admin can match the payment later.' : 'Both are needed for the record. We look them up in the accounting workbook.') + '</p>' +
+        '<p id="cash-find-error" class="error" hidden></p>' +
+        (mode === 'external' ? '<button id="cash-external" class="btn block" data-act="cash-external">' + (c.lookup && c.lookup.external ? 'Start again' : 'Continue') + '</button>'
+          : '<button id="cash-find" class="btn block" data-act="cash-find">' + (c.lookup && !c.lookup.external ? 'Look up again' : 'Find student') + '</button>') +
         '<div id="cash-body" style="margin-top:18px"></div>';
     },
     after: function () {
-      cashRenderBody();
-      ['email', 'phone'].forEach(function (k) { $('cash-' + k).addEventListener('input', function (e) { state.cash[k] = e.target.value; }); });
+      if ((state.cash.mode || 'student') === 'agent') {
+        var keep = pads.staff && pads.staff.signed() ? pads.staff.png() : null;
+        pads = {}; if ($('sig-staff')) { pads.staff = sigPad($('sig-staff'), function () { sigMark('staff'); }); if (keep) restoreSig('staff', keep); }
+        if (!state.cashAgents) sapi('cashAgentsGet', []).then(function (r) { state.cashAgents = r.agents || []; var dl = $('cash-agent-list'); if (dl) dl.innerHTML = state.cashAgents.map(function (n) { return '<option value="' + esc(n) + '">'; }).join(''); }).catch(function () {});
+      } else cashRenderBody();
+      ['email', 'phone'].forEach(function (k) { if ($('cash-' + k)) $('cash-' + k).addEventListener('input', function (e) { state.cash[k] = e.target.value; }); });
       if (cashListeners) return; cashListeners = true;
       $('page').addEventListener('input', function (e) {
         if (current().page !== 'cashNew' || !state.cash) return;
@@ -1100,6 +1107,13 @@
         else if (e.target.id === 'cash-tuition-note') { state.cash.tuitionNote = e.target.value; err('cash-error', ''); }
         else if (e.target.id === 'cash-ov-amount') { state.cash.ovAmount = e.target.value; err('cash-error', ''); cashUpdateTotal(); }
         else if (e.target.id === 'cash-ov-reason') { state.cash.ovReason = e.target.value; err('cash-error', ''); }
+        else if (e.target.id === 'cash-agent') { state.cash.agent = e.target.value; err('cash-error', ''); }
+        else if (e.target.id === 'cash-agent-note') { state.cash.agentNote = e.target.value; }
+        else if (e.target.id === 'cash-agent-amt') {
+          state.cash.agentAmt = e.target.value; err('cash-error', '');
+          var am = cashAgentAmount(), tt = document.querySelector('.cash-total b'); if (tt) tt.textContent = money(am);
+          var gb = $('cash-go'); if (gb) { gb.disabled = !(am > 0); gb.textContent = am > 0 ? 'Cash ' + money(am) + ' received' : 'Enter the amount'; }
+        }
       });
       $('page').addEventListener('change', function (e) {
         if (current().page !== 'cashNew' || !state.cash) return;
@@ -1112,6 +1126,39 @@
       });
     }
   };
+  /* ---- cash from an agent: a lump sum, the agent's name (remembered for next time), and only the staff signature ---- */
+  function cashAgentAmount() { var a = String(state.cash.agentAmt || '').trim(); return /^\d{1,6}(\.\d{1,2})?$/.test(a) ? Number(a) : 0; }
+  function cashAgentHtml() {
+    var c = state.cash, amt = cashAgentAmount();
+    return '<p class="lead">A lump sum from an agent. Type the agent’s name (names you’ve used before are offered as you type), the amount, and sign.</p>' +
+      '<div class="group">' +
+      '<label class="cell"><span>Agent</span><input id="cash-agent" type="text" list="cash-agent-list" autocomplete="off" maxlength="80" value="' + esc(c.agent) + '" placeholder="Agent’s name"></label>' +
+      '<label class="cell"><span>Amount</span><input id="cash-agent-amt" type="text" inputmode="decimal" autocomplete="off" value="' + esc(c.agentAmt) + '" placeholder="e.g. 200"></label>' +
+      '<label class="cell"><span>Note</span><input id="cash-agent-note" type="text" autocomplete="off" maxlength="120" value="' + esc(c.agentNote) + '" placeholder="Optional: what it’s for"></label></div>' +
+      '<datalist id="cash-agent-list">' + (state.cashAgents || []).map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>' +
+      '<div class="cash-total"><span>Cash to collect</span><b>' + money(amt) + '</b></div>' +
+      '<div class="group-head">You sign</div>' + sigBox('staff', '<span>Received by ' + esc(state.user.name) + '</span>') +
+      '<p id="cash-error" class="error" hidden></p><button id="cash-go" class="btn primary block" data-act="cash-agent-save"' + (amt > 0 ? '' : ' disabled') + '>' + (amt > 0 ? 'Cash ' + money(amt) + ' received' : 'Enter the amount') + '</button>' +
+      '<p class="group-foot">Saved as a cash record and counted in today’s cash book. No student receipt is made.</p>';
+  }
+  function cashAgentSave() {
+    var c = state.cash, amt = cashAgentAmount();
+    c.agent = ($('cash-agent') ? $('cash-agent').value : c.agent).trim().replace(/\s+/g, ' '); c.agentNote = ($('cash-agent-note') ? $('cash-agent-note').value : c.agentNote).trim();
+    if (c.agent.length < 2) return err('cash-error', 'Enter the agent’s name.');
+    if (!(amt > 0)) return err('cash-error', 'Enter the amount, like 200 or 200.50.');
+    if (!pads.staff || !pads.staff.signed()) return err('cash-error', 'You need to sign as the person receiving the cash.');
+    err('cash-error', '');
+    dialog({ title: 'Take ' + money(amt) + ' cash?', html: 'From agent <b>' + esc(c.agent) + '</b>.' + (c.agentNote ? '<br>' + esc(c.agentNote) : '') + '<br>Count the cash first.' + (state.practice ? '<br><b>Practice mode:</b> this will be a TEST record.' : ''), ok: 'Cash received' }).then(function (r) {
+      if (!r) return;
+      var b = $('cash-go'); b.disabled = true; b.innerHTML = '<span class="spinner sm"></span>'; state.busy = true;
+      sapi('cashAgentRecord', [{ agent: c.agent, amount: String(c.agentAmt).trim(), note: c.agentNote, staffSig: pads.staff.png() }]).then(function (x) {
+        buzz(30); state.cash = newCashState(); pads = {}; state.loadedAt.me = 0; state.cashAgents = null;
+        state.stack = []; state.tab = 'cash'; state.cashRep = null; state.cashMine = null; render();
+        cashPdfAct(x.cashId, null, { title: 'Saved · ' + (x.agentNo || x.cashId), html: '<b>' + money(x.amount) + '</b> from agent <b>' + esc(x.name) + '</b>.<br>Agent receipt <b>' + esc(x.agentNo || '') + '</b> · cash record ' + esc(x.cashId) + '.<br>It’s in the Cash tab and today’s cash book.<br>The record with your signature is ready to print.', ok: 'Print', cancel: 'Done' });
+      }).catch(function (e) { if (!e.signedOut) { err('cash-error', e.message); var bb = $('cash-go'); if (bb) { bb.disabled = false; bb.textContent = 'Cash ' + money(amt) + ' received'; } } })
+        .then(function () { state.busy = false; });
+    });
+  }
   function cashFind(btn, external) {
     var c = state.cash; c.email = $('cash-email').value.trim(); c.phone = $('cash-phone').value.trim();
     if (external ? (!c.email || !c.phone) : (!c.email && !c.phone)) return err('cash-find-error', external ? 'Enter their email and phone number; that\u2019s how the admin finds them later.' : 'Enter their email or phone number.');
@@ -1235,19 +1282,22 @@
       var kv = [['Amount', '<b>' + money(x.amount) + '</b> cash'], ['For', esc(x.summary)]];
       if (x.sorrentino || x.palliative) kv.push(['Handed over', esc(itemsText(x))]);
       if (x.note) kv.push(['Note', esc(x.note)]);
-      kv.push(['Student', esc(x.name)]);
+      var isAgentRec = (x.lines || []).some(function (l) { return l.id === 'agent'; });
+      if (x.agentNo) kv.push(['Agent receipt no.', esc(x.agentNo)]);
+      kv.push([isAgentRec ? 'From agent' : 'Student', esc(x.name)]);
       if (x.workbookName && x.workbookName.toLowerCase() !== x.name.toLowerCase()) kv.push(['In workbook as', esc(titleCase(x.workbookName))]);
-      kv.push(['Phone', esc(x.phone)], ['Email', esc(x.email)]);
+      if (!isAgentRec) kv.push(['Phone', esc(x.phone)], ['Email', esc(x.email)]);
       if (x.studentNumber) kv.push(['Student ID', esc(x.studentNumber)]);
       if (x.batch) kv.push(['Batch', esc(x.batch)]);
-      kv.push(['Agent', esc(agentLabel(x.agent))], ['Received by', esc(x.receivedByName) + ' (@' + esc(x.receivedBy) + ')'], ['When', esc(when(x.at))]);
+      if (!isAgentRec) kv.push(['Agent', esc(agentLabel(x.agent))]);
+      kv.push(['Received by', esc(x.receivedByName) + ' (@' + esc(x.receivedBy) + ')'], ['When', esc(when(x.at))]);
       if (x.orderNo) kv.push(['Order', '#' + x.orderNo]);
       var h = (x.status === 'void' ? '<div class="banner red">' + ICON.warn + '<span class="grow">Voided ' + esc(when(x.voidAt)) + ' by @' + esc(x.voidBy) + ': ' + esc(x.voidReason) + '</span></div>' : '') +
         (x.flags.length ? '<div class="c-tags" style="margin:0 0 12px">' + x.flags.map(function (f) { return '<span class="tag">' + esc(f) + '</span>'; }).join('') + '</div>' : '') +
         '<div class="group"><dl class="kv" style="padding:6px 16px 10px">' + kv.map(function (p) { return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join('') + '</dl></div>' +
         '<div class="rc-btns" style="margin:14px 0 6px"><button class="btn small" data-act="cash-pdf" data-cash="' + esc(x.cashId) + '">' + ICON.sheet + 'Cash record PDF (signatures)</button>' +
         (x.receipts || []).map(function (r) { return rcButton(r) + (r.status === 'void' ? ' <span class="chip grey">VOID</span>' : ''); }).join('') + '</div>' +
-        '<div class="group-head">Student signature</div><div class="sig-view"><img alt="Student signature" src="' + esc(x.studentSig) + '"><span>' + esc(x.name) + '</span></div>' +
+        (x.studentSig ? '<div class="group-head">Student signature</div><div class="sig-view"><img alt="Student signature" src="' + esc(x.studentSig) + '"><span>' + esc(x.name) + '</span></div>' : '') +
         '<div class="group-head">Received by</div><div class="sig-view"><img alt="Staff signature" src="' + esc(x.staffSig) + '"><span>' + esc(x.receivedByName) + '</span></div>';
       var acts = '';
       if (can('override')) acts += '<button class="row accent" data-act="cash-edit" data-cash="' + esc(x.cashId) + '"><span class="grow"><span class="title">Fix name / phone / email</span><span class="sub">Owner only. Needs a reason; logged.</span></span></button>';
@@ -1334,7 +1384,7 @@
     return sapi('cashGet', [cashId]).then(function (x) { c = x; return Promise.all([receiptLogo(), sigImage(x.studentSig), sigImage(x.staffSig)]); })
       .then(function (r) {
         var p = { blob: new Blob([window.PrimeReceipt.cashPdf(c, r[0], { student: r[1], staff: r[2] })], { type: 'application/pdf' }), name: window.PrimeReceipt.cashFileName(c), count: 1 };
-        return dialog(o || { title: 'Cash record ' + c.cashId, html: '<b>' + esc(titleCase(c.workbookName || c.name)) + '</b> · ' + money(c.amount) + ' cash<br>The receipt with the record number and both signatures.', ok: 'Print / share', cancel: 'Close' })
+        return dialog(o || { title: 'Cash record ' + c.cashId, html: '<b>' + esc(titleCase(c.workbookName || c.name)) + '</b> · ' + money(c.amount) + ' cash<br>' + (c.studentSig ? 'The receipt with the record number and both signatures.' : 'The agent payment receipt with its record number and the staff signature.') + '', ok: 'Print / share', cancel: 'Close' })
           .then(function (ok) { if (ok) sharePdf(p); });
       })
       .catch(function (e) {
@@ -2340,6 +2390,8 @@
     $('v-main').addEventListener('click', function (e) {
       var s = e.target.closest('[data-seg]');
       if (s && s.closest('.seg')) { state.seg = s.dataset.seg; set(LS.seg, state.seg); updateOrders(); return; }
+      var cm = e.target.closest('[data-cashmode]');
+      if (cm && state.cash) { if ((state.cash.mode || 'student') !== cm.dataset.cashmode) { var keepC = state.cash; state.cash = newCashState(); state.cash.mode = cm.dataset.cashmode; state.cash.email = keepC.email; state.cash.phone = keepC.phone; pads = {}; rerender(); } return; }
       var cv = e.target.closest('[data-cbview]');
       if (cv) { state.cbView = cv.dataset.cbview; state.cbSum = null; rerender(); if (state.cbView !== 'day') loadCashBookSummary(); return; }
       var cr = e.target.closest('[data-cashrange]');
@@ -2387,6 +2439,7 @@
         case 'cash-find': return cashFind(b, false);
         case 'cash-external': return cashFind(b, true);
         case 'cash-save': return cashSave();
+        case 'cash-agent-save': return cashAgentSave();
         case 'sig-clear': if (pads[b.dataset.sig]) { pads[b.dataset.sig].clear(); sigMark(b.dataset.sig); } return;
         case 'sig-big': return openSigFull(b.dataset.sig);
         case 'drawer': return openDrawer();

@@ -237,11 +237,46 @@
    *     receiptViews: the receipts made for this cash (full) }. Without a receipt (not in the workbook yet, override) the page shows
    *     the cash lines with "Receipt No." left as Not issued. sigs = { student: image|null, staff: image|null } (see build).
    */
+  /**
+   * Agent payment receipt: a simple one-page record for a lump sum of cash from an agent. Record number and date,
+   * who it came from, the amount in figures and words, an optional note, and the staff member's signature.
+   */
+  function agentPage_(c, hasStaffSig) {
+    var D = drawer(), L = 60, R = 552, y = 132;
+    var note = c.note || (((c.lines || [])[0] || {}).note) || '';
+    D.header('Agent Payment Receipt', 'new');
+    function row(label, value, big) {
+      D.text(label, L + 12, y + (big ? 22 : 17), 'F2', 10, 'left');
+      D.text(value, R - 12, y + (big ? 23 : 17), big ? 'F2' : 'F1', big ? 16 : 11, 'right', R - L - 190);
+      y += big ? 36 : 27; D.line(L, y, R, y, 0.5);
+    }
+    var top = y;
+    row('Agent Receipt No.', c.agentNo || '');
+    row('Cash Record No.', c.cashId);
+    row('Date', longDate(torontoYmd(c.at)));
+    row('Received from (agent)', c.name);
+    row('Amount', money(Number(c.amount)), true);
+    row('Amount in words', c.words || '');
+    row('Payment method', 'Cash');
+    if (note) row('Note', note);
+    D.rect(L, top, R - L, y - top, 1);
+    // signature
+    y += 26;
+    D.text('Received by', L, y, 'F2', 10, 'left');
+    if (hasStaffSig) D.image('Im3', L, y + 6, 198, 66);
+    D.line(L, y + 78, L + 240, y + 78, 0.6);
+    D.text(c.receivedByName || '', L, y + 92, 'F1', 10, 'left', 240);
+    D.text('Prime International College', R, y + 92, 'F1', 9, 'right', 240, 0.4);
+    D.text('E&OE', R, y + 110, 'F1', 8, 'right');
+    D.stamp(c.status === 'void' ? 'VOID' : c.test ? 'TEST' : '');
+    return D.ops.join('\n');
+  }
   function cashPdf(c, logo, sigs) {
     sigs = sigs || {};
     var images = { Im1: { kind: 'jpeg', bytes: asBytes(logo) } };
     if (sigs.student) images.Im2 = sigs.student;
     if (sigs.staff) images.Im3 = sigs.staff;
+    if ((c.lines || []).some(function (l) { return l.id === 'agent'; })) return build([agentPage_(c, !!sigs.staff)], images, 'Agent payment ' + (c.agentNo || c.cashId) + ' - ' + c.name);
     var day = torontoYmd(c.at), who = titleCase(c.workbookName || '') || c.name;
     var list = (c.receiptViews || []).length ? c.receiptViews : [{
       no: 'Not issued', studentId: c.studentNumber || '', name: who, program: '', date: day, title: c.studentNumber ? 'Tuition Receipt' : 'Receipt',
@@ -485,7 +520,7 @@
   }
   function cashFileName(c) {
     var safe = function (s) { return String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''); };
-    return safe(c.cashId) + '_' + safe(titleCase(c.workbookName || c.name)) + '_' + safe(torontoParts(c.at).date) + (c.status === 'void' ? '_VOID' : '') + '.pdf';
+    return safe(c.agentNo ? c.agentNo + '_' + c.cashId : c.cashId) + '_' + safe(titleCase(c.workbookName || c.name)) + '_' + safe(torontoParts(c.at).date) + (c.status === 'void' ? '_VOID' : '') + '.pdf';
   }
 
   var api = { pdf: pdf, cashPdf: cashPdf, cashbookPdf: cashbookPdf, cashbookFileName: cashbookFileName, cashbookRangePdf: cashbookRangePdf, cashbookRangeFileName: cashbookRangeFileName, pngImage: pngImage, cashFileName: cashFileName, money: money, longDate: longDate, fileName: function (rs) {
